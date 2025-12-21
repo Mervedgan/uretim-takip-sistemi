@@ -1,0 +1,665 @@
+@startuml UretimTakip_ClassDiagram
+
+title Production Tracking System - Class Diagram\n(Backend + Mobile Application)
+
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+' ==========================================
+' BACKEND (FastAPI)
+' ==========================================
+
+package "Backend - FastAPI" {
+  
+  package "Database" {
+    class Database {
+      + engine: Engine
+      + SessionLocal: sessionmaker
+      + Base: declarative_base
+      + get_db(): Session
+    }
+  }
+  
+  package "Config" {
+    class Config {
+      + SECRET_KEY: str
+      + ALGORITHM: str
+      + ACCESS_TOKEN_EXPIRE_MINUTES: int
+    }
+  }
+  
+  package "Models (SQLAlchemy)" {
+    class UserModel {
+      - id: int
+      - username: str
+      - password_hash: str
+      - role: str
+    }
+    
+    class WorkOrder {
+      - id: int
+      - product_code: str
+      - lot_no: str
+      - qty: int
+      - planned_start: datetime
+      - planned_end: datetime
+    }
+    
+    class WorkOrderStage {
+      - id: int
+      - work_order_id: int
+      - stage_name: str
+      - planned_start: datetime
+      - planned_end: datetime
+      - actual_start: datetime
+      - actual_end: datetime
+      - status: str
+    }
+    
+    class Issue {
+      - id: int
+      - work_order_stage_id: int
+      - type: str
+      - description: str
+      - created_by: int
+      - created_at: datetime
+    }
+    
+    WorkOrder "1" *-- "0..*" WorkOrderStage : contains
+    WorkOrderStage "1" *-- "0..*" Issue : has
+    UserModel "1" *-- "0..*" Issue : creates
+  }
+  
+  package "Schemas (Pydantic)" {
+    class StartDoneResponse {
+      + ok: bool
+      + work_order_stage_id: int
+      + status: str
+      + actual_start: datetime
+      + actual_end: datetime
+    }
+    
+    class IssueCreate {
+      + type: str
+      + description: str
+    }
+    
+    class WorkOrderCreate {
+      + product_code: str
+      + lot_no: str
+      + qty: int
+      + planned_start: datetime
+      + planned_end: datetime
+    }
+    
+    class OAuth2PasswordRequestForm {
+      + username: str
+      + password: str
+    }
+  }
+  
+  package "Routers" {
+    class AuthRouter {
+      + login()
+      + register()
+      + verify_token()
+      + get_current_user()
+      + require_roles()
+      + create_access_token()
+    }
+    
+    class StagesRouter {
+      + start_stage(wos_id)
+      + done_stage(wos_id)
+      + report_issue(wos_id)
+    }
+    
+    class WorkOrdersRouter {
+      + create_work_order()
+      + list_work_orders()
+      + get_work_order(wo_id)
+      + get_work_order_stages(wo_id)
+    }
+  }
+  
+  package "Auth Helpers" {
+    class AuthHelpers {
+      + create_access_token()
+      + verify_token()
+      + get_current_user()
+      + require_roles()
+      + pwd_context: CryptContext
+      + oauth2_scheme: OAuth2PasswordBearer
+    }
+  }
+  
+  class FastAPIApp {
+    + app: FastAPI
+    + include_router()
+    + setup_cors()
+    + setup_database()
+    + custom_openapi()
+  }
+  
+  FastAPIApp --> Database : uses
+  FastAPIApp --> AuthRouter
+  FastAPIApp --> StagesRouter
+  FastAPIApp --> WorkOrdersRouter
+  
+  Database --> UserModel : manages
+  Database --> WorkOrder : manages
+  Database --> WorkOrderStage : manages
+  Database --> Issue : manages
+  
+  AuthRouter ..> OAuth2PasswordRequestForm : uses
+  AuthRouter ..> UserModel : queries
+  AuthRouter ..> Database : uses
+  AuthRouter ..> Config : uses
+  AuthRouter ..> AuthHelpers : uses
+  
+  StagesRouter ..> StartDoneResponse : returns
+  StagesRouter ..> IssueCreate : uses
+  StagesRouter ..> WorkOrderStage : queries
+  StagesRouter ..> Issue : creates
+  StagesRouter ..> Database : uses
+  StagesRouter ..> AuthHelpers : uses
+  
+  WorkOrdersRouter ..> WorkOrderCreate : uses
+  WorkOrdersRouter ..> WorkOrder : queries
+  WorkOrdersRouter ..> WorkOrderStage : queries
+  WorkOrdersRouter ..> Database : uses
+  WorkOrdersRouter ..> AuthHelpers : uses
+}
+
+' ==========================================
+' MOBILE APPLICATION (React Native)
+' ==========================================
+
+package "Mobile - React Native" {
+  
+  package "Types" {
+    class UserType {
+      + id: string
+      + username: string
+      + password: string
+      + role: UserRole
+      + name: string
+      + department: string
+      + phone: string
+      + email: string
+    }
+    
+    class Machine {
+      + id: string
+      + name: string
+      + status: string
+      + currentProductionId: string
+      + lastMaintenanceDate: Date
+    }
+    
+    class ProductionRecord {
+      + id: string
+      + machineId: string
+      + operatorId: string
+      + operatorName: string
+      + productName: string
+      + startTime: Date
+      + endTime: Date
+      + partCount: number
+      + targetCount: number
+      + status: string
+      + efficiency: number
+      + duration: number
+      + cycleTime: number
+      + issue: string
+      + pausedAt: Date
+      + stages: List<ProductionStage>
+    }
+    
+    class ProductionStage {
+      + id: string
+      + name: string
+      + order: number
+      + startTime: Date
+      + endTime: Date
+      + status: string
+    }
+    
+    class MachinePerformance {
+      + machineId: string
+      + machineName: string
+      + totalProductions: number
+      + totalParts: number
+      + averageEfficiency: number
+      + averageDuration: number
+      + uptime: number
+      + lastProductionDate: Date
+    }
+    
+    class ProductionAnalysis {
+      + totalProductions: number
+      + totalParts: number
+      + totalActiveMachines: number
+      + averageEfficiency: number
+      + operatorPerformance: List<OperatorPerformance>
+      + machinePerformance: List<MachinePerformance>
+      + dailyProduction: List<DailyProduction>
+    }
+    
+    ProductionRecord "1" *-- "0..*" ProductionStage : contains
+  }
+  
+  package "Screens" {
+    class App {
+      - user: UserType
+      - currentScreen: Screen
+      - isCheckingAuth: boolean
+      + checkAuthStatus()
+      + handleLogin()
+      + handleLogout()
+      + handleSignup()
+      + renderRoleSpecificScreen()
+    }
+    
+    class LoginScreen {
+      - username: string
+      - password: string
+      - isLoading: boolean
+      + handleLogin()
+      + handleSignup()
+    }
+    
+    class SignupScreen {
+      - formData: FormData
+      - isLoading: boolean
+      + validateForm()
+      + generateUsername()
+      + handleSignup()
+      + updateField()
+    }
+    
+    class DashboardScreen {
+      - activeProductions: List<ProductionRecord>
+      - refreshKey: number
+      - showIssueModal: boolean
+      - selectedProductionId: string
+      - issueDescription: string
+      + formatDateTime()
+      + calculatePartCount()
+      + handleStopProduction()
+      + handleResumeProduction()
+      + handleSubmitIssue()
+      + refreshData()
+    }
+    
+    class OperatorScreen {
+      - productName: string
+      - targetCount: string
+      - machineId: string
+      - cycleTime: string
+      - stageCount: string
+      - stageNames: List<string>
+      + handleStartProduction()
+      + handleCompleteProduction()
+      + handleStageCountChange()
+      + createStages()
+      + clearForm()
+    }
+    
+    class PlannerScreen {
+      - machinePerformance: List<MachinePerformance>
+      + formatDate()
+      + calculateMachinePerformance()
+      + renderMachinePerformance()
+    }
+    
+    class ManagerScreen {
+      - activeProductions: List<ProductionRecord>
+      - productionAnalysis: ProductionAnalysis
+      - machines: List<Machine>
+      + formatDate()
+      + formatDateTime()
+      + calculateAnalysis()
+      + renderProductionAnalysis()
+      + renderOperatorPerformance()
+    }
+  }
+  
+  package "Utils" {
+    class ApiClient {
+      - baseURL: string
+      - timeout: number
+      - instance: AxiosInstance
+      + interceptors
+      + post()
+      + get()
+      + put()
+      + delete()
+    }
+    
+    class AuthAPI {
+      + login(username, password): LoginResponse
+      + register(params): RegisterResponse
+      + getCurrentUser(): UserType
+      + logout(): void
+      + isAuthenticated(): boolean
+    }
+    
+    class StagesAPI {
+      + startStage(stageId)
+      + doneStage(stageId)
+      + issueStage(stageId, issueData)
+      + getStages(): List
+    }
+    
+    class WorkOrdersAPI {
+      + getWorkOrders(): List
+      + createWorkOrder(data): object
+    }
+    
+    class ProductionAPI {
+      + getProduction()
+      + getMetrics()
+    }
+    
+    class ReportsAPI {
+      + getEfficiencyReport()
+      + getProductionReport()
+    }
+    
+    class TokenStorage {
+      + saveToken(token: string)
+      + getToken(): string
+      + saveRefreshToken(token: string)
+      + getRefreshToken(): string
+      + saveUser(user: UserType)
+      + getUser(): UserType
+      + clearAll()
+    }
+    
+    class UserStorage {
+      + saveUser(user: UserType)
+      + getAllUsers(): List<UserType>
+      + findUser(username, password): UserType
+      + usernameExists(username): boolean
+      + clearAllUsers()
+    }
+    
+    class Validators {
+      + email(email: string): boolean
+      + phone(phone: string): boolean
+      + password(password: string): boolean
+      + username(username: string): boolean
+      + required(value: string): boolean
+    }
+    
+    class AIEfficiencyCalculator {
+    }
+    
+    class QualityCheckNotificationService {
+    }
+    
+    class NotificationService {
+    }
+    
+    class WorkOrderService {
+    }
+    
+    class WorkOrderViewService {
+    }
+    
+    class DurationEstimationService {
+    }
+  }
+  
+  package "Data" {
+    class ProductionStore {
+      - productions: List<ProductionRecord>
+      - isInitialized: boolean
+      + initialize(records: List<ProductionRecord>)
+      + add(record: ProductionRecord)
+      + update(id: string, updates: ProductionRecord)
+      + remove(id: string)
+      + getById(id: string): ProductionRecord
+      + getActive(): List<ProductionRecord>
+      + getCompleted(): List<ProductionRecord>
+      + getAll(): List<ProductionRecord>
+      + clear()
+      + getDebugInfo()
+    }
+  }
+  
+  package "API Types" {
+    class LoginResponse {
+      + access_token: string
+      + refresh_token: string
+      + token_type: string
+      + user: UserType
+    }
+    
+    class RegisterResponse {
+      + access_token: string
+      + refresh_token: string
+      + token_type: string
+      + user: UserType
+    }
+    
+    class RegisterRequest {
+      + username: string
+      + password: string
+      + name: string
+      + role: UserRole
+      + phone: string
+      + email: string
+      + department: string
+    }
+    
+    class LoginRequest {
+      + username: string
+      + password: string
+    }
+  }
+}
+
+' Relationships - Mobile Application
+App --> LoginScreen : uses
+App --> SignupScreen : uses
+App --> DashboardScreen : uses
+App --> OperatorScreen : uses
+App --> PlannerScreen : uses
+App --> ManagerScreen : uses
+
+LoginScreen --> AuthAPI : uses
+SignupScreen --> AuthAPI : uses
+SignupScreen --> UserStorage : uses
+SignupScreen --> Validators : uses
+
+DashboardScreen --> ProductionStore : uses
+DashboardScreen --> ProductionRecord : displays
+
+OperatorScreen --> ProductionStore : uses
+OperatorScreen --> ProductionRecord : creates
+OperatorScreen --> ProductionStage : manages
+
+PlannerScreen --> MachinePerformance : displays
+ManagerScreen --> ProductionAnalysis : displays
+
+AuthAPI --> ApiClient : uses
+AuthAPI --> TokenStorage : uses
+AuthAPI --> LoginResponse : returns
+AuthAPI --> RegisterResponse : returns
+
+StagesAPI --> ApiClient : uses
+WorkOrdersAPI --> ApiClient : uses
+ProductionAPI --> ApiClient : uses
+ReportsAPI --> ApiClient : uses
+
+PlannerScreen --> AIEfficiencyCalculator : uses
+ManagerScreen --> AIEfficiencyCalculator : uses
+OperatorScreen --> QualityCheckNotificationService : uses
+OperatorScreen --> NotificationService : uses
+OperatorScreen --> WorkOrderViewService : uses
+PlannerScreen --> WorkOrderService : uses
+ManagerScreen --> WorkOrderService : uses
+WorkOrderService --> DurationEstimationService : uses
+
+ApiClient --> LoginRequest : sends
+ApiClient --> RegisterRequest : sends
+
+ProductionStore --> ProductionRecord : manages
+
+' Backend - Mobile Communication
+AuthAPI ..> AuthRouter : "HTTP POST /auth/login"
+AuthAPI ..> AuthRouter : "HTTP POST /auth/register"
+StagesAPI ..> StagesRouter : "HTTP POST /stages/start"
+StagesAPI ..> StagesRouter : "HTTP POST /stages/done"
+StagesAPI ..> StagesRouter : "HTTP POST /stages/issue"
+WorkOrdersAPI ..> WorkOrdersRouter : "HTTP GET /workorders"
+WorkOrdersAPI ..> WorkOrdersRouter : "HTTP POST /workorders"
+WorkOrdersAPI ..> WorkOrdersRouter : "HTTP GET /workorders/{id}"
+WorkOrdersAPI ..> WorkOrdersRouter : "HTTP GET /workorders/{id}/stages"
+
+' Backend Models to Mobile Types Mapping
+WorkOrder ..|> ProductionRecord : "maps to"
+WorkOrderStage ..|> ProductionStage : "maps to"
+Issue ..|> ProductionRecord : "maps to issue"
+
+note right of FastAPIApp
+  FastAPI Backend
+  - RESTful API
+  - JWT Authentication
+  - SQLAlchemy ORM (SQLite)
+  - Pydantic Validation
+  - CORS Middleware
+  - OpenAPI/Swagger Docs
+  - Role-based Access Control
+end note
+
+note right of Database
+  Database Module
+  - SQLite Database
+  - Session Management
+  - Base Model Class
+  - Connection Pooling
+end note
+
+note right of AuthHelpers
+  Authentication Helpers
+  - JWT Token Creation
+  - Token Verification
+  - Password Hashing (bcrypt)
+  - Role-based Authorization
+  - OAuth2 Password Bearer
+end note
+
+note right of App
+  React Native Mobile Application
+  - TypeScript
+  - AsyncStorage (Local Storage)
+  - Axios (HTTP Client)
+  - Role-based Screens
+  - Real-time Production Tracking
+  - Machine Stop/Resume Feature
+  - Issue Reporting System
+end note
+
+note bottom of ApiClient
+  HTTP Client
+  - Request Interceptors (JWT Token)
+  - Response Interceptors (Token Refresh)
+  - Error Handling
+  - Query Parameters for Auth
+end note
+
+note right of ProductionRecord
+  Production Features:
+  - Auto-complete on target count
+  - Pause/Resume with issue tracking
+  - Real-time part count calculation
+  - Cycle time based tracking
+  - Issue history (persistent)
+end note
+
+note right of WorkOrder
+  Backend Model:
+  - Work Order system
+  - Product code, lot number, quantity
+  - Planned start/end times
+  - Related to stages
+end note
+
+note right of WorkOrderStage
+  Backend Model:
+  - Work order stages
+  - Planned and actual times
+  - Status: planned/in_progress/done
+  - Related to issue reports
+end note
+
+note right of Issue
+  Backend Model:
+  - Stage-based issue reporting
+  - Issue type and description
+  - Reporting user information
+  - Creation time
+end note
+
+note right of WorkOrdersAPI
+  Mobile API:
+  - List work orders
+  - Create new work order
+  - Backend: /workorders endpoint
+end note
+
+note right of ProductionAPI
+  Mobile API:
+  - Production data (TODO)
+  - Not yet in backend
+  - Mobile app uses local store
+end note
+
+note right of ReportsAPI
+  Mobile API:
+  - Reports (TODO)
+  - Not yet in backend
+  - Mobile app performs local calculation
+end note
+
+note right of AIEfficiencyCalculator
+  AI-Supported Efficiency Calculation
+  - AI-based efficiency analysis
+  - To be integrated later
+end note
+
+note right of QualityCheckNotificationService
+  Defective Product Test Notification Service
+  - Periodic product check notification to operator
+  - To be integrated later
+end note
+
+note right of NotificationService
+  Additional Notifications Service
+  - General notification management
+  - To be integrated later
+end note
+
+note right of WorkOrderService
+  Work Order Service
+  - Work order creation for manager and planner
+  - To be integrated later
+end note
+
+note right of WorkOrderViewService
+  Work Order View Service
+  - Work order viewing for operator
+  - To be integrated later
+end note
+
+note right of DurationEstimationService
+  Work Duration Estimation Service
+  - Estimated calculation of how long a job will take
+  - To be integrated later
+end note
+
+@enduml
+

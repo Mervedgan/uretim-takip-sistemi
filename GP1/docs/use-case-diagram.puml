@@ -1,0 +1,333 @@
+@startuml UretimTakip_UseCaseDiagram
+
+!define RECTANGLE class
+
+title Production Tracking System - Use Case Diagram
+
+left to right direction
+
+' Actors
+actor "Operator" as Operator
+actor "Planner" as Planner
+actor "Manager" as Manager
+actor "System" as System
+
+' Packages
+package "Authentication" {
+  usecase "Register" as UC_Register
+  usecase "Login" as UC_Login
+  usecase "Logout" as UC_Logout
+}
+
+package "Dashboard" {
+  usecase "View Dashboard" as UC_ViewDashboard
+  usecase "View Active Productions" as UC_ViewActiveProductions
+  usecase "View Machine Status" as UC_ViewMachineStatus
+}
+
+package "Operator Operations" {
+  usecase "Start Production" as UC_StartProduction
+  usecase "Complete Production" as UC_CompleteProduction
+  usecase "Update Part Count" as UC_UpdatePartCount
+  usecase "View Work Orders" as UC_ViewWorkOrders
+  usecase "View Work Order Details" as UC_ViewWorkOrderDetails
+  usecase "View Work Order Stages" as UC_ViewWorkOrderStages
+  usecase "Start Stage" as UC_StartStage
+  usecase "Done Stage" as UC_DoneStage
+  usecase "Report Issue on Stage" as UC_ReportIssueOnStage
+  usecase "Stop Machine" as UC_StopMachine
+  usecase "Resume Machine" as UC_ResumeMachine
+  usecase "Report Issue" as UC_ReportIssue
+  usecase "Enter Machine ID" as UC_EnterMachineId
+  usecase "Enter Cycle Time" as UC_EnterCycleTime
+  usecase "Receive Quality Check Notification" as UC_ReceiveQualityCheckNotification
+  usecase "View Notifications" as UC_ViewNotifications
+}
+
+package "Planner Operations" {
+  usecase "Create Work Order" as UC_CreateWorkOrder
+  usecase "View Work Orders" as UC_ViewWorkOrders_Planner
+  usecase "View Work Order Details" as UC_ViewWorkOrderDetails_Planner
+  usecase "View Work Order Stages" as UC_ViewWorkOrderStages_Planner
+  usecase "Start Stage" as UC_StartStage_Planner
+  usecase "Done Stage" as UC_DoneStage_Planner
+  usecase "Report Issue on Stage" as UC_ReportIssueOnStage_Planner
+  usecase "View Machine Performance" as UC_ViewMachinePerformance
+  usecase "View Production Metrics" as UC_ViewProductionMetrics
+  usecase "View Machine Reports" as UC_ViewMachineReports
+  usecase "View Issue Reports" as UC_ViewIssueReports_Planner
+  usecase "Calculate AI Efficiency" as UC_CalculateAIEfficiency_Planner
+  usecase "Estimate Work Duration" as UC_EstimateWorkDuration_Planner
+  usecase "View Notifications" as UC_ViewNotifications_Planner
+}
+
+package "Manager Operations" {
+  usecase "Create Work Order" as UC_CreateWorkOrder_Manager
+  usecase "View Work Orders" as UC_ViewWorkOrders_Manager
+  usecase "View Work Order Details" as UC_ViewWorkOrderDetails_Manager
+  usecase "View Work Order Stages" as UC_ViewWorkOrderStages_Manager
+  usecase "View Production Analysis" as UC_ViewProductionAnalysis
+  usecase "View Operator Performance" as UC_ViewOperatorPerformance
+  usecase "View Daily Production Reports" as UC_ViewDailyReports
+  usecase "View Overall Statistics" as UC_ViewStatistics
+  usecase "View Machine Performance Analysis" as UC_ViewMachineAnalysis
+  usecase "View Issue Reports" as UC_ViewIssueReports_Manager
+  usecase "Calculate AI Efficiency" as UC_CalculateAIEfficiency_Manager
+  usecase "Estimate Work Duration" as UC_EstimateWorkDuration_Manager
+  usecase "View Notifications" as UC_ViewNotifications_Manager
+}
+
+' Relationships - Operator
+Operator --> UC_Login
+Operator --> UC_Logout
+Operator --> UC_ViewDashboard
+Operator --> UC_ViewActiveProductions
+Operator --> UC_ViewMachineStatus
+Operator --> UC_StartProduction
+Operator --> UC_CompleteProduction
+Operator --> UC_UpdatePartCount
+Operator --> UC_ViewWorkOrders
+Operator --> UC_ViewWorkOrderDetails
+Operator --> UC_ViewWorkOrderStages
+Operator --> UC_StartStage
+Operator --> UC_DoneStage
+Operator --> UC_ReportIssueOnStage
+Operator --> UC_StopMachine
+Operator --> UC_ResumeMachine
+Operator --> UC_ReportIssue
+Operator --> UC_EnterMachineId
+Operator --> UC_EnterCycleTime
+Operator --> UC_ReceiveQualityCheckNotification
+Operator --> UC_ViewNotifications
+
+' Relationships - Planner
+Planner --> UC_Login
+Planner --> UC_Logout
+Planner --> UC_ViewDashboard
+Planner --> UC_ViewActiveProductions
+Planner --> UC_ViewMachineStatus
+Planner --> UC_CreateWorkOrder
+Planner --> UC_ViewWorkOrders_Planner
+Planner --> UC_ViewWorkOrderDetails_Planner
+Planner --> UC_ViewWorkOrderStages_Planner
+Planner --> UC_StartStage_Planner
+Planner --> UC_DoneStage_Planner
+Planner --> UC_ReportIssueOnStage_Planner
+Planner --> UC_ViewMachinePerformance
+Planner --> UC_ViewProductionMetrics
+Planner --> UC_ViewMachineReports
+Planner --> UC_ViewIssueReports_Planner
+Planner --> UC_CalculateAIEfficiency_Planner
+Planner --> UC_EstimateWorkDuration_Planner
+Planner --> UC_ViewNotifications_Planner
+
+' Relationships - Manager
+Manager --> UC_Login
+Manager --> UC_Logout
+Manager --> UC_ViewDashboard
+Manager --> UC_ViewActiveProductions
+Manager --> UC_ViewMachineStatus
+Manager --> UC_CreateWorkOrder_Manager
+Manager --> UC_ViewWorkOrders_Manager
+Manager --> UC_ViewWorkOrderDetails_Manager
+Manager --> UC_ViewWorkOrderStages_Manager
+Manager --> UC_ViewProductionAnalysis
+Manager --> UC_ViewOperatorPerformance
+Manager --> UC_ViewDailyReports
+Manager --> UC_ViewStatistics
+Manager --> UC_ViewMachineAnalysis
+Manager --> UC_ViewMachinePerformance
+Manager --> UC_ViewProductionMetrics
+Manager --> UC_ViewIssueReports_Manager
+Manager --> UC_CalculateAIEfficiency_Manager
+Manager --> UC_EstimateWorkDuration_Manager
+Manager --> UC_ViewNotifications_Manager
+
+' System relationships
+System --> UC_Login : "Authentication"
+System --> UC_Register : "User Registration"
+System --> UC_ViewActiveProductions : "Data Update"
+System --> UC_UpdatePartCount : "Automatic Calculation"
+System --> UC_CompleteProduction : "Auto-complete when\nTarget Count Reached"
+System --> UC_ReceiveQualityCheckNotification : "Periodic\nQuality Check Notification"
+System --> UC_CalculateAIEfficiency_Planner : "AI Efficiency Calculation"
+System --> UC_CalculateAIEfficiency_Manager : "AI Efficiency Calculation"
+
+' Include relationships
+UC_StartProduction ..> UC_EnterMachineId : <<include>>
+UC_StartProduction ..> UC_EnterCycleTime : <<include>>
+UC_StopMachine ..> UC_ReportIssue : <<include>>
+UC_CompleteProduction ..> UC_UpdatePartCount : <<include>>
+UC_ViewWorkOrderDetails ..> UC_ViewWorkOrderStages : <<include>>
+UC_ViewWorkOrderDetails_Planner ..> UC_ViewWorkOrderStages_Planner : <<include>>
+UC_ViewWorkOrderDetails_Manager ..> UC_ViewWorkOrderStages_Manager : <<include>>
+UC_ViewProductionAnalysis ..> UC_ViewOperatorPerformance : <<include>>
+UC_ViewProductionAnalysis ..> UC_ViewMachineAnalysis : <<include>>
+UC_ViewActiveProductions ..> UC_ViewIssueReports_Planner : <<extend>>
+UC_ViewActiveProductions ..> UC_ViewIssueReports_Manager : <<extend>>
+UC_CreateWorkOrder ..> UC_EstimateWorkDuration_Planner : <<include>>
+UC_CreateWorkOrder_Manager ..> UC_EstimateWorkDuration_Manager : <<include>>
+UC_ViewProductionAnalysis ..> UC_CalculateAIEfficiency_Manager : <<include>>
+UC_ViewMachinePerformance ..> UC_CalculateAIEfficiency_Planner : <<include>>
+
+' Extend relationships
+UC_ViewDashboard <.. UC_ViewActiveProductions : <<extend>>
+UC_ViewDashboard <.. UC_ViewMachineStatus : <<extend>>
+
+note right of UC_Register
+  When user registers:
+  - Full Name
+  - Phone
+  - Email
+  - Password
+  - Role (operator/planner/manager)
+  information is entered
+end note
+
+note right of UC_StartProduction
+  When operator starts production:
+  - Product name
+  - Machine ID (manual entry)
+  - Target part count (optional)
+  - Cycle time (seconds/product)
+  - Production stages (optional)
+  information is entered
+end note
+
+note right of UC_StopMachine
+  Operator stops machine:
+  - Clicks Stop button
+  - Issue report modal opens
+  - Enters issue description
+  - Machine is stopped and issue is saved
+  - Issue report appears on Planner and Manager
+    screens
+end note
+
+note right of UC_ResumeMachine
+  Operator resumes machine:
+  - Clicks Resume button
+  - Machine continues working
+  - Issue report remains in history
+    (not deleted, continues to be visible)
+end note
+
+note right of UC_ViewProductionAnalysis
+  Manager views:
+  - Total production count
+  - Total part count
+  - Average efficiency (AI supported - currently 0)
+  - Operator performances
+  - Machine performances
+  - Daily production summaries
+  - Issue reports (including history)
+end note
+
+note right of UC_CompleteProduction
+  System automatically:
+  - When target count is reached
+  - Marks production as completed
+  - Saves end time
+  - Removes from active productions
+end note
+
+note right of UC_ViewIssueReports_Planner
+  Planner views:
+  - Machine stop reasons
+  - Stop times
+  - Issue descriptions
+  - Historical issue reports
+    (even if machine is active)
+end note
+
+note right of UC_CreateWorkOrder
+  Planner/Manager creates work order:
+  - Product code (product_code)
+  - Lot number (lot_no)
+  - Quantity (qty)
+  - Planned start time
+  - Planned end time
+  Backend endpoint: POST /workorders/
+  Permission: planner or admin role
+end note
+
+note right of UC_StartStage
+  Operator/Planner starts stage:
+  - Work order stage ID
+  - Actual start time is saved
+  - Status becomes "in_progress"
+  Backend endpoint: POST /stages/{wos_id}/start
+  Permission: worker or planner role
+end note
+
+note right of UC_DoneStage
+  Operator/Planner completes stage:
+  - Work order stage ID
+  - Actual end time is saved
+  - Status becomes "done"
+  Backend endpoint: POST /stages/{wos_id}/done
+  Permission: worker or planner role
+end note
+
+note right of UC_ReportIssueOnStage
+  Operator/Planner reports issue on stage:
+  - Work order stage ID
+  - Issue type (type)
+  - Issue description (description)
+  - Reporting user is saved
+  Backend endpoint: POST /stages/{wos_id}/issue
+  Permission: worker or planner role
+end note
+
+note right of UC_ReceiveQualityCheckNotification
+  System sends periodic notifications to operator:
+  - Reminds to check products for defective product testing
+  - Automatic notification at specific time intervals
+  - Operator sees notification and checks products
+  To be integrated later
+end note
+
+note right of UC_ViewNotifications
+  Users view notifications:
+  - All notifications are listed
+  - Notification statuses (read/unread)
+  - Notification categories
+  - Notification history
+  To be integrated later
+end note
+
+note right of UC_CalculateAIEfficiency_Planner
+  Planner calculates AI-supported efficiency:
+  - Efficiency analysis with AI algorithm
+  - Calculation based on machine performance data
+  - Predictions and recommendations
+  To be integrated later
+end note
+
+note right of UC_CalculateAIEfficiency_Manager
+  Manager calculates AI-supported efficiency:
+  - Efficiency analysis with AI algorithm
+  - General production performance analysis
+  - Efficiency calculation by operator and machine
+  - Predictions and recommendations
+  To be integrated later
+end note
+
+note right of UC_EstimateWorkDuration_Planner
+  Planner estimates work duration:
+  - Estimated duration is calculated when creating work order
+  - Prediction based on historical data
+  - Calculation based on machine and operator performance
+  To be integrated later
+end note
+
+note right of UC_EstimateWorkDuration_Manager
+  Manager estimates work duration:
+  - Estimated duration is calculated when creating work order
+  - Prediction based on historical data
+  - Calculation based on machine and operator performance
+  To be integrated later
+end note
+
+@enduml
+
