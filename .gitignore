@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.backup
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+database.db
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Alembic
+alembic/versions/*.pyc
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# PowerShell
+*.ps1.bak
+
+# Docker
+docker-compose.override.yml
+
+# Backend - Virtual Environment (tüm .venv içeriği)
+backend/.venv/
+
+# Backend - Python cache files
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+
+# GP1 - Expo ve React Native kalıntıları (isteğe bağlı - sadece backend commit edilecekse)
+# GP1/node_modules/
+# GP1/.expo/
+# GP1/.expo-shared/
+# GP1/dist/
+# GP1/web-build/
+
+
+

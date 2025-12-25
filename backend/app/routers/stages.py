@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import WorkOrderStage, Issue
+from app.models import WorkOrderStage, Issue, Notification
 from app.schemas import StartDoneResponse, IssueCreate
-from app.routers.auth import require_roles  # ✅ Import helper
+from app.routers.auth import require_roles
+from app.utils.state_machine import validate_state_transition
 
 router = APIRouter(prefix="/stages", tags=["stages"])
 
@@ -28,11 +29,22 @@ def start_stage(
     if not s:
         raise HTTPException(status_code=404, detail="Stage not found")
 
+    # ✅ State machine validation
+    if s.status != "planned":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start stage. Current status: {s.status}. Expected: 'planned'"
+        )
+
     if s.actual_start is None:
-        s.actual_start = datetime.now(timezone.utc)
-        s.status = "in_progress"
-        db.commit()
-        db.refresh(s)
+        try:
+            validate_state_transition(s.status, "in_progress")
+            s.actual_start = datetime.now(timezone.utc)
+            s.status = "in_progress"
+            db.commit()
+            db.refresh(s)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     return {
         "ok": True,
@@ -64,11 +76,22 @@ def done_stage(
     if s.actual_start is None:
         raise HTTPException(status_code=400, detail="Stage not started yet")
 
+    # ✅ State machine validation
+    if s.status != "in_progress":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot complete stage. Current status: {s.status}. Expected: 'in_progress'"
+        )
+
     if s.actual_end is None:
-        s.actual_end = datetime.now(timezone.utc)
-        s.status = "done"
-        db.commit()
-        db.refresh(s)
+        try:
+            validate_state_transition(s.status, "done")
+            s.actual_end = datetime.now(timezone.utc)
+            s.status = "done"
+            db.commit()
+            db.refresh(s)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     return {
         "ok": True,
@@ -109,9 +132,21 @@ def report_issue(
     db.commit()
     db.refresh(issue)
 
+    # ✅ DB tabanlı notification oluştur (manager'lara bildir)
+    for role in ["admin", "planner"]:
+        notification = Notification(
+            issue_id=issue.id,
+            recipient_role=role,
+            message=f"New issue #{issue.id} reported: {payload.type} - {payload.description or 'No description'}"
+        )
+        db.add(notification)
+    
+    db.commit()
+
     return {
         "ok": True, 
         "issue_id": issue.id,
-        "reported_by": current_user["username"]  # ✅ Kullanıcı bilgisi
+        "reported_by": current_user["username"],  # ✅ Kullanıcı bilgisi
+        "notifications_sent": 2  # admin + planner
     }
 

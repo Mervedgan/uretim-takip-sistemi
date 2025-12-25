@@ -21,16 +21,24 @@ export const API_ENDPOINTS = {
   CURRENT_USER: '/auth/me',
   
   // Stages
-  STAGES: '/stages',
-  STAGE_START: '/stages/start',
-  STAGE_DONE: '/stages/done',
-  STAGE_ISSUE: '/stages/issue',
+  STAGE_START: '/stages',
+  STAGE_DONE: '/stages',
+  STAGE_ISSUE: '/stages',
   
-  // Work Orders (TODO: Backend kalan işler)
-  WORK_ORDERS: '/work-orders',
-  WORK_ORDER_CREATE: '/work-orders',
+  // Work Orders
+  WORK_ORDERS: '/workorders',
+  WORK_ORDER_DETAIL: '/workorders',
+  WORK_ORDER_STAGES: '/workorders',
   
-  // Production
+  // Machines
+  MACHINES: '/machines',
+  MACHINE_READINGS: '/machines',
+  
+  // Metrics
+  WORK_ORDER_METRICS: '/metrics/workorders',
+  STAGE_METRICS: '/metrics/stages',
+  
+  // Production (legacy - may not be used)
   PRODUCTION: '/production',
   PRODUCTION_METRICS: '/production/metrics',
   

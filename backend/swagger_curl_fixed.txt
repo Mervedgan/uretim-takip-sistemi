@@ -1,0 +1,41 @@
+# DÜZGÜN CURL KOMUTU (PowerShell'de çalıştırın)
+
+# Önce token alın:
+# POST /auth/login → username: admin, password: admin123
+# access_token değerini kopyalayın
+
+# Sonra bu komutu kullanın (TOKEN'ı değiştirin):
+
+curl -X 'POST' \
+  'http://localhost:8000/workorders/' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImV4cCI6MTc2NjQyNzgxNn0.5ujdM_eFIxSge3JA-P-JE95BYotGbuCxSoEA3BVi5IA' \
+  -d '{
+  "product_code": "PRD-001",
+  "lot_no": "LOT-001",
+  "qty": 100,
+  "planned_start": "2024-12-22T10:00:00",
+  "planned_end": "2024-12-22T14:00:00"
+}'
+
+# ============================================
+# ALTERNATİF: PowerShell Formatı (DAHA KOLAY)
+# ============================================
+
+$token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImV4cCI6MTc2NjQyNzgxNn0.5ujdM_eFIxSge3JA-P-JE95BYotGbuCxSoEA3BVi5IA"
+$headers = @{}
+$headers["Authorization"] = "Bearer " + $token
+$headers["Content-Type"] = "application/json"
+$body = @{
+    product_code = "PRD-001"
+    lot_no = "LOT-001"
+    qty = 100
+    planned_start = "2024-12-22T10:00:00"
+    planned_end = "2024-12-22T14:00:00"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/workorders/" -Method POST -Headers $headers -Body $body
+
+
+

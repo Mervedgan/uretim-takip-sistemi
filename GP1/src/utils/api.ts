@@ -1,243 +1,158 @@
-/**
- * API Service
- * Optimized API functions for FastAPI backend
- */
-import apiClient from './apiClient';
-import { API_ENDPOINTS } from './apiConfig';
-import { tokenStorage } from './tokenStorage';
-import { User, UserRole } from '../types';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// Eğer apiConfig dosyan yoksa veya hataysa, URL'i aşağıda elle yazdım.
+// import { API_BASE_URL, API_ENDPOINTS } from './apiConfig'; 
 
-// API Response Types
-export interface LoginResponse {
-  access_token: string;
-  refresh_token?: string;
-  token_type: string;
-  user: User;
-}
+// 1. İŞÇİYİ OLUŞTUR (Genel İstek Aracı)
+const apiClient = axios.create({
+  baseURL: 'http://10.0.2.2:8000', // Android Emülatör için standart adres
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
-export interface RegisterResponse {
-  access_token: string;
-  refresh_token?: string;
-  token_type: string;
-  user: User;
-}
-
-export interface ApiError {
-  detail: string | string[];
-  message?: string;
-}
-
-// Backend Request Types (FastAPI Pydantic format)
-export interface RegisterRequest {
-  username: string;
-  password: string;
-  name: string;
-  role: UserRole;
-  phone?: string | null;
-  email?: string | null;
-  department?: string | null;
-}
-
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-/**
- * Format API error message
- */
-const formatApiError = (error: any): string => {
-  if (error.response?.data?.detail) {
-    const detail = error.response.data.detail;
-    if (Array.isArray(detail)) {
-      return detail.map((err: any) => {
-        const field = err.loc?.join('.') || 'field';
-        return `${field}: ${err.msg}`;
-      }).join('\n');
+// 2. ÖNEMLİ: TOKEN EKLEME (Her istekten önce çalışır)
+apiClient.interceptors.request.use(
+  async (config) => {
+    // Telefondan token'ı oku
+    const token = await AsyncStorage.getItem('userToken');
+    
+    // Eğer token varsa, mektubun üzerine yapıştır
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+      console.log("🔑 Token eklendi:", token.substring(0, 10) + "...");
+    } else {
+      console.log("⚠️ Token bulunamadı! İstek tokensiz gidiyor.");
     }
-    return typeof detail === 'string' ? detail : JSON.stringify(detail);
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
   }
-  return error.message || 'Bir hata oluştu';
+);
+
+// 3. SERVİSLERİ TANIMLA
+export const productionAPI = {
+  // Kalıpları Getir
+  async getMolds() {
+    // apiClient kullanıyoruz ki token eklensin!
+    return apiClient.get('/molds'); 
+  },
+
+  // Üretim Verilerini Getir (Dashboard için)
+  async getProduction() {
+    return apiClient.get('/production');
+  },
+
+  // Metrikleri Getir
+  async getMetrics() {
+    return apiClient.get('/production/metrics');
+  },
+  
+  // Ürünleri Getir
+  async getProducts() {
+      return apiClient.get('/products');
+  }
 };
 
-/**
- * Authentication API
- */
 export const authAPI = {
-  /**
-   * Login with username and password
-   * Backend expects query parameters, not body
-   */
-  async login(username: string, password: string): Promise<LoginResponse> {
+  async login(username: string, password: string) {
     try {
-      const params = {
-        username: username.trim(),
-        password: password,
+      // OAuth2PasswordRequestForm expects form-data (application/x-www-form-urlencoded)
+      const params = new URLSearchParams();
+      params.append('username', username.trim());
+      params.append('password', password);
+      
+      const response = await apiClient.post('/auth/login', params.toString(), {
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        
+        
+      });
+      
+      const { access_token, token_type, user: userData } = response.data;
+      
+      // Token'ı kaydet
+      await AsyncStorage.setItem('userToken', access_token);
+      
+      // User bilgisini formatla (backend'den geliyorsa kullan, yoksa token'dan çıkar)
+      let user;
+      if (userData) {
+        user = {
+          id: userData.id?.toString() || userData.user_id?.toString() || '1',
+          username: userData.username || username.trim(),
+          password: '', // Şifreyi saklamıyoruz
+          role: userData.role || 'operator',
+          name: userData.name || userData.username || username.trim(),
+          department: userData.department || undefined,
+          phone: userData.phone || undefined,
+          email: userData.email || undefined,
+        };
+      } else {
+        // Backend'den user bilgisi gelmediyse, username'den oluştur
+        user = {
+          id: '1',
+          username: username.trim(),
+          password: '',
+          role: 'operator', // Varsayılan rol
+          name: username.trim(),
+        };
+      }
+      
+      // User bilgisini de kaydet
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+      
+      return {
+        access_token,
+        token_type,
+        user,
       };
-
-      console.log('Sending POST request to:', API_ENDPOINTS.LOGIN);
-      console.log('Query params:', params);
-      
-      const response = await apiClient.post<LoginResponse>(
-        API_ENDPOINTS.LOGIN,
-        null, // No body
-        { params } // Query parameters
-      );
-      
-      console.log('Login response:', response.status, response.data);
-
-      const { access_token, refresh_token, user } = response.data;
-
-      // Save tokens
-      await tokenStorage.saveToken(access_token);
-      if (refresh_token) {
-        await tokenStorage.saveRefreshToken(refresh_token);
+    } catch (error: any) {
+      console.error('Login error:', error);
+      if (error.response) {
+        const errorMessage = error.response.data?.detail || 'Giriş yapılamadı';
+        throw new Error(errorMessage);
       }
-      await tokenStorage.saveUser(user);
-
-      return response.data;
-    } catch (error: any) {
-      const errorMessage = formatApiError(error);
-      throw new Error(errorMessage);
+      throw new Error(error.message || 'Giriş yapılamadı');
     }
   },
 
-  /**
-   * Register new user
-   * Backend expects query parameters, not body
-   * Backend format: username, password, name, role, phone (optional), email (optional), department (optional)
-   */
-  async register(
-    username: string,
-    password: string,
-    name: string,
-    role: UserRole,
-    phone?: string,
-    email?: string,
-    department?: string
-  ): Promise<RegisterResponse> {
+  async getCurrentUser() {
     try {
-      // Backend'e gönderilecek veri - Query parameters olarak
-      const params: any = {
-        username: username.trim(),
-        password: password,
-        name: name.trim(),
-        role: role,
-      };
-
-      // Optional parameters - sadece varsa ekle
-      if (phone && phone.trim()) {
-        params.phone = phone.trim();
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        throw new Error('Token bulunamadı');
       }
-      if (email && email.trim()) {
-        params.email = email.trim();
+      // Token'dan user bilgisini decode etmek için backend'e istek atabiliriz
+      // Şimdilik token'dan user bilgisini çıkaramıyoruz, bu yüzden storage'dan alalım
+      // Backend'de /auth/me endpoint'i yok, bu yüzden tokenStorage'dan alıyoruz
+      const user = await AsyncStorage.getItem('user');
+      if (user) {
+        return JSON.parse(user);
       }
-      if (department && department.trim()) {
-        params.department = department.trim();
-      }
-
-      console.log('Sending POST request to:', API_ENDPOINTS.REGISTER);
-      console.log('Query params:', params);
-      
-      const response = await apiClient.post<RegisterResponse>(
-        API_ENDPOINTS.REGISTER,
-        null, // No body
-        { params } // Query parameters
-      );
-      
-      console.log('Register response:', response.status, response.data);
-
-      const { access_token, refresh_token, user } = response.data;
-
-      // Save tokens
-      await tokenStorage.saveToken(access_token);
-      if (refresh_token) {
-        await tokenStorage.saveRefreshToken(refresh_token);
-      }
-      await tokenStorage.saveUser(user);
-
-      return response.data;
+      throw new Error('Kullanıcı bilgisi bulunamadı');
     } catch (error: any) {
-      const errorMessage = formatApiError(error);
-      throw new Error(errorMessage);
+      console.error('Get current user error:', error);
+      throw new Error(error.message || 'Kullanıcı bilgisi alınamadı');
     }
   },
 
-  /**
-   * Get current authenticated user
-   */
-  async getCurrentUser(): Promise<User> {
+  async isAuthenticated() {
     try {
-      const response = await apiClient.get<User>(API_ENDPOINTS.CURRENT_USER);
-      return response.data;
-    } catch (error: any) {
-      const errorMessage = formatApiError(error);
-      throw new Error(errorMessage);
+      const token = await AsyncStorage.getItem('userToken');
+      return token !== null;
+    } catch (error) {
+      return false;
     }
   },
 
-  /**
-   * Logout - clear stored tokens
-   */
-  async logout(): Promise<void> {
-    await tokenStorage.clearAll();
-  },
-
-  /**
-   * Check if user is authenticated
-   */
-  async isAuthenticated(): Promise<boolean> {
-    const token = await tokenStorage.getToken();
-    return token !== null;
-  },
-};
-
-/**
- * Stages API
- */
-export const stagesAPI = {
-  async startStage(stageId: string, data?: any): Promise<any> {
+  async logout() {
     try {
-      const response = await apiClient.post(
-        `${API_ENDPOINTS.STAGE_START}/${stageId}`,
-        data
-      );
-      return response.data;
-    } catch (error: any) {
-      throw new Error(formatApiError(error));
-    }
-  },
-
-  async doneStage(stageId: string, data?: any): Promise<any> {
-    try {
-      const response = await apiClient.post(
-        `${API_ENDPOINTS.STAGE_DONE}/${stageId}`,
-        data
-      );
-      return response.data;
-    } catch (error: any) {
-      throw new Error(formatApiError(error));
-    }
-  },
-
-  async issueStage(stageId: string, issueData: any): Promise<any> {
-    try {
-      const response = await apiClient.post(
-        `${API_ENDPOINTS.STAGE_ISSUE}/${stageId}`,
-        issueData
-      );
-      return response.data;
-    } catch (error: any) {
-      throw new Error(formatApiError(error));
-    }
-  },
-
-  async getStages(): Promise<any[]> {
-    try {
-      const response = await apiClient.get(API_ENDPOINTS.STAGES);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(formatApiError(error));
+      await AsyncStorage.removeItem('userToken');
+      await AsyncStorage.removeItem('user');
+    } catch (error) {
+      console.error('Logout error:', error);
     }
   },
 };
@@ -246,90 +161,177 @@ export const stagesAPI = {
  * Work Orders API
  */
 export const workOrdersAPI = {
-  async getWorkOrders(): Promise<any[]> {
+  async getWorkOrders() {
     try {
-      const response = await apiClient.get(API_ENDPOINTS.WORK_ORDERS);
+      const response = await apiClient.get('/workorders/');
       return response.data;
     } catch (error: any) {
-      throw new Error(formatApiError(error));
+      console.error('Error getting work orders:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'İş emirleri yüklenemedi');
     }
   },
 
-  async createWorkOrder(data: any): Promise<any> {
+  async getWorkOrder(woId: number) {
     try {
-      const response = await apiClient.post(
-        API_ENDPOINTS.WORK_ORDER_CREATE,
-        data
-      );
+      const response = await apiClient.get(`/workorders/${woId}`);
       return response.data;
     } catch (error: any) {
-      throw new Error(formatApiError(error));
+      console.error('Error getting work order:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'İş emri yüklenemedi');
+    }
+  },
+
+  async getWorkOrderStages(woId: number) {
+    try {
+      const response = await apiClient.get(`/workorders/${woId}/stages`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting work order stages:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Aşamalar yüklenemedi');
+    }
+  },
+
+  async createWorkOrder(data: {
+    product_code: string;
+    lot_no: string;
+    qty: number;
+    planned_start: string;
+    planned_end: string;
+  }) {
+    try {
+      const response = await apiClient.post('/workorders/', data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error creating work order:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'İş emri oluşturulamadı');
     }
   },
 };
 
 /**
- * Production API
+ * Machines API
  */
-export const productionAPI = {
-  async getProduction(): Promise<any> {
+export const machinesAPI = {
+  async getMachines() {
     try {
-      const response = await apiClient.get(API_ENDPOINTS.PRODUCTION);
+      const response = await apiClient.get('/machines/');
       return response.data;
     } catch (error: any) {
-      throw new Error(formatApiError(error));
+      console.error('Error getting machines:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Makineler yüklenemedi');
     }
   },
 
-  async getMetrics(): Promise<any> {
-    try {
-      const response = await apiClient.get(API_ENDPOINTS.PRODUCTION_METRICS);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(formatApiError(error));
-    }
-  },
-};
-
-/**
- * Reports API
- */
-export const reportsAPI = {
-  async getEfficiencyReport(params?: any): Promise<any> {
+  async getMachineReadings(machineId: number, limit: number = 100) {
     try {
       const response = await apiClient.get(
-        API_ENDPOINTS.REPORTS_EFFICIENCY,
-        { params }
+        `/machines/${machineId}/readings`,
+        { params: { limit } }
       );
       return response.data;
     } catch (error: any) {
-      throw new Error(formatApiError(error));
+      console.error('Error getting machine readings:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Makine okumaları yüklenemedi');
     }
   },
 
-  async getProductionReport(params?: any): Promise<any> {
+  async createMachine(data: {
+    name: string;
+    machine_type: string;
+    location?: string;
+    status?: string;
+  }) {
     try {
-      const response = await apiClient.get(
-        API_ENDPOINTS.REPORTS_PRODUCTION,
-        { params }
-      );
+      const response = await apiClient.post('/machines/', data);
       return response.data;
     } catch (error: any) {
-      throw new Error(formatApiError(error));
+      console.error('Error creating machine:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Makine oluşturulamadı');
     }
   },
 };
 
 /**
- * AI Data API
+ * Stages API
  */
-export const aiDataAPI = {
-  async getAIData(params?: any): Promise<any> {
+export const stagesAPI = {
+  async startStage(stageId: number) {
     try {
-      const response = await apiClient.get(API_ENDPOINTS.AI_DATA, { params });
+      const response = await apiClient.post(`/stages/${stageId}/start`);
       return response.data;
     } catch (error: any) {
-      throw new Error(formatApiError(error));
+      console.error('Error starting stage:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Aşama başlatılamadı');
+    }
+  },
+
+  async doneStage(stageId: number) {
+    try {
+      const response = await apiClient.post(`/stages/${stageId}/done`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error completing stage:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Aşama tamamlanamadı');
+    }
+  },
+
+  async issueStage(stageId: number, issueData: { type: string; description?: string }) {
+    try {
+      const response = await apiClient.post(`/stages/${stageId}/issue`, issueData);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error reporting issue:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Sorun bildirilemedi');
+    }
+  },
+};
+
+/**
+ * Products API
+ */
+export const productsAPI = {
+  async getProducts() {
+    try {
+      const response = await apiClient.get('/products/');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting products:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürünler yüklenemedi');
+    }
+  },
+
+  async getProduct(productId: number) {
+    try {
+      const response = await apiClient.get(`/products/${productId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting product:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürün yüklenemedi');
+    }
+  },
+};
+
+/**
+ * Molds API
+ */
+export const moldsAPI = {
+  async getMolds() {
+    try {
+      const response = await apiClient.get('/molds/');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting molds:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kalıplar yüklenemedi');
+    }
+  },
+
+  async getMold(moldId: number) {
+    try {
+      const response = await apiClient.get(`/molds/${moldId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting mold:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kalıp yüklenemedi');
     }
   },
 };

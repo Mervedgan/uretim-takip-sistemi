@@ -1,0 +1,49 @@
+# Swagger'dan alınan curl komutu (ORİJİNAL):
+curl -X 'POST' \
+  'http://localhost:8000/workorders/' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "product_code": "PRD-001",
+  "lot_no": "LOT-001",
+  "qty": 100,
+  "planned_start": "2024-12-22T10:00:00",
+  "planned_end": "2024-12-22T14:00:00"
+}'
+
+# ============================================
+# DÜZENLENMİŞ VERSİYON (Authorization eklenmiş):
+# ============================================
+# Token'ı POST /auth/login'den alın ve YOUR_TOKEN_HERE yerine yapıştırın
+
+curl -X 'POST' \
+  'http://localhost:8000/workorders/' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_TOKEN_HERE' \
+  -d '{
+  "product_code": "PRD-001",
+  "lot_no": "LOT-001",
+  "qty": 100,
+  "planned_start": "2024-12-22T10:00:00",
+  "planned_end": "2024-12-22T14:00:00"
+}'
+
+# ============================================
+# ÖRNEK (Gerçek token ile):
+# ============================================
+curl -X 'POST' \
+  'http://localhost:8000/workorders/' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImV4cCI6MTc2NjQyNjE1MH0.KnHMkjxNWkQkSMgx2kCYxUWcmG7_U3Y68' \
+  -d '{
+  "product_code": "PRD-001",
+  "lot_no": "LOT-001",
+  "qty": 100,
+  "planned_start": "2024-12-22T10:00:00",
+  "planned_end": "2024-12-22T14:00:00"
+}'
+
+
+

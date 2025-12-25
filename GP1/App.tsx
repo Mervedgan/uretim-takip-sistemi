@@ -11,11 +11,13 @@ import DashboardScreen from './src/screens/DashboardScreen';
 import OperatorScreen from './src/screens/OperatorScreen';
 import PlannerScreen from './src/screens/PlannerScreen';
 import ManagerScreen from './src/screens/ManagerScreen';
+import ProductsScreen from './src/screens/ProductsScreen';
+import MoldsScreen from './src/screens/MoldsScreen';
 import { User } from './src/types';
 import { authAPI } from './src/utils/api';
 import { tokenStorage } from './src/utils/tokenStorage';
 
-type Screen = 'dashboard' | 'role-specific' | 'signup';
+type Screen = 'dashboard' | 'role-specific' | 'signup' | 'products' | 'molds';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -85,11 +87,20 @@ function App() {
     setCurrentScreen('dashboard');
   };
 
+  const handleNavigateToProducts = () => {
+    setCurrentScreen('products');
+  };
+
+  const handleNavigateToMolds = () => {
+    setCurrentScreen('molds');
+  };
+
   const renderRoleSpecificScreen = () => {
     if (!user) return null;
 
     switch (user.role) {
       case 'operator':
+      case 'worker':
         return <OperatorScreen user={user} onBack={handleBackToDashboard} />;
       case 'planner':
         return <PlannerScreen user={user} onBack={handleBackToDashboard} />;
@@ -139,7 +150,19 @@ function App() {
         <DashboardScreen 
           user={user} 
           onLogout={handleLogout} 
-          onNavigateToRoleScreen={handleNavigateToRoleScreen} 
+          onNavigateToRoleScreen={handleNavigateToRoleScreen}
+          onNavigateToProducts={handleNavigateToProducts}
+          onNavigateToMolds={handleNavigateToMolds}
+        />
+      ) : currentScreen === 'products' ? (
+        <ProductsScreen 
+          user={user} 
+          onBack={handleBackToDashboard} 
+        />
+      ) : currentScreen === 'molds' ? (
+        <MoldsScreen 
+          user={user} 
+          onBack={handleBackToDashboard} 
         />
       ) : (
         renderRoleSpecificScreen()
