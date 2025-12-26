@@ -1,7 +1,41 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // Eğer apiConfig dosyan yoksa veya hataysa, URL'i aşağıda elle yazdım.
-// import { API_BASE_URL, API_ENDPOINTS } from './apiConfig'; 
+// import { API_BASE_URL, API_ENDPOINTS } from './apiConfig';
+
+// Base64 decode helper (React Native için)
+function base64Decode(str: string): string {
+  try {
+    // React Native'de atob global olabilir, yoksa polyfill kullan
+    if (typeof atob !== 'undefined') {
+      return atob(str);
+    }
+    // Fallback: Manuel base64 decode (basit versiyon)
+    // Base64 karakter seti
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let result = '';
+    let i = 0;
+    str = str.replace(/[^A-Za-z0-9\+\/]/g, '');
+    
+    while (i < str.length) {
+      const encoded1 = chars.indexOf(str.charAt(i++));
+      const encoded2 = chars.indexOf(str.charAt(i++));
+      const encoded3 = chars.indexOf(str.charAt(i++));
+      const encoded4 = chars.indexOf(str.charAt(i++));
+      
+      const bitmap = (encoded1 << 18) | (encoded2 << 12) | (encoded3 << 6) | encoded4;
+      
+      result += String.fromCharCode((bitmap >> 16) & 255);
+      if (encoded3 !== 64) result += String.fromCharCode((bitmap >> 8) & 255);
+      if (encoded4 !== 64) result += String.fromCharCode(bitmap & 255);
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Base64 decode error:', error);
+    throw error;
+  }
+} 
 
 // 1. İŞÇİYİ OLUŞTUR (Genel İstek Aracı)
 const apiClient = axios.create({
@@ -89,9 +123,10 @@ export const authAPI = {
       // Token'ı kaydet
       await AsyncStorage.setItem('userToken', access_token);
       
-      // User bilgisini formatla (backend'den geliyorsa kullan, yoksa token'dan çıkar)
+      // User bilgisini formatla
       let user;
       if (userData) {
+        // Backend'den user bilgisi geliyorsa kullan
         user = {
           id: userData.id?.toString() || userData.user_id?.toString() || '1',
           username: userData.username || username.trim(),
@@ -103,15 +138,42 @@ export const authAPI = {
           email: userData.email || undefined,
         };
       } else {
-        // Backend'den user bilgisi gelmediyse, username'den oluştur
-        user = {
-          id: '1',
-          username: username.trim(),
-          password: '',
-          role: 'operator', // Varsayılan rol
-          name: username.trim(),
-        };
+        // Backend'den user bilgisi gelmiyorsa, JWT token'ından decode et
+        try {
+          // JWT token formatı: header.payload.signature
+          // Payload'ı decode et (base64)
+          const tokenParts = access_token.split('.');
+          if (tokenParts.length === 3) {
+            const payload = JSON.parse(base64Decode(tokenParts[1])); // Base64 decode
+            const decodedRole = payload.role;
+            const decodedUsername = payload.sub;
+            
+            console.log('🔍 Token\'dan decode edilen bilgiler:', { username: decodedUsername, role: decodedRole });
+            
+            user = {
+              id: '1',
+              username: decodedUsername || username.trim(),
+              password: '',
+              role: decodedRole || 'operator', // Token'dan gelen role bilgisini kullan
+              name: decodedUsername || username.trim(),
+            };
+          } else {
+            throw new Error('Invalid token format');
+          }
+        } catch (decodeError) {
+          console.error('❌ Token decode hatası:', decodeError);
+          // Token decode edilemezse, username'den oluştur (fallback)
+          user = {
+            id: '1',
+            username: username.trim(),
+            password: '',
+            role: 'operator', // Son çare: varsayılan rol
+            name: username.trim(),
+          };
+        }
       }
+      
+      console.log('✅ Login başarılı - User bilgisi:', { username: user.username, role: user.role });
       
       // User bilgisini de kaydet
       await AsyncStorage.setItem('user', JSON.stringify(user));
@@ -128,6 +190,62 @@ export const authAPI = {
         throw new Error(errorMessage);
       }
       throw new Error(error.message || 'Giriş yapılamadı');
+    }
+  },
+
+  async register(
+    username: string,
+    password: string,
+    name: string,
+    role: string,
+    phone: string,
+    email: string,
+    department?: string
+  ) {
+    try {
+      // Backend UserCreate schema: username, password, email, phone, role
+      // name ve department backend'de desteklenmiyor, sadece frontend'de kullanılıyor
+      const response = await apiClient.post('/auth/register', {
+        username: username.trim(),
+        password: password,
+        role: role.toLowerCase(),
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+      });
+
+      const { user: userData, access_token } = response.data;
+      
+      // Token varsa kaydet (backend register sonrası token döndürüyor)
+      if (access_token) {
+        await AsyncStorage.setItem('userToken', access_token);
+      }
+      
+      // User bilgisini formatla (frontend için name ve department ekle)
+      const user = {
+        id: userData.id?.toString() || userData.user_id?.toString() || '1',
+        username: userData.username || username.trim(),
+        password: '',
+        role: userData.role || role.toLowerCase(),
+        name: name.trim() || userData.username || username.trim(), // Frontend için name
+        department: department || undefined, // Frontend için department
+        phone: userData.phone || phone.trim(),
+        email: userData.email || email.trim(),
+      };
+
+      // User bilgisini de kaydet
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+
+      return {
+        user,
+        access_token: access_token || null,
+      };
+    } catch (error: any) {
+      console.error('Register error:', error);
+      if (error.response) {
+        const errorMessage = error.response.data?.detail || 'Kayıt işlemi başarısız';
+        throw new Error(errorMessage);
+      }
+      throw new Error(error.message || 'Kayıt işlemi başarısız');
     }
   },
 

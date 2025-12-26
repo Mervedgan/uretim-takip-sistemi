@@ -210,9 +210,9 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         planned_end: endDate.toISOString(),
       };
 
+      console.log('📤 PlannerScreen - İş emri oluşturuluyor:', workOrderData);
       const result = await workOrdersAPI.createWorkOrder(workOrderData);
       
-      setLoading(false);
       Alert.alert(
         'Başarılı', 
         `İş emri oluşturuldu! (ID: ${result.work_order_id})\n${result.stages_created} aşama otomatik oluşturuldu.`,
@@ -229,10 +229,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         }}]
       );
     } catch (error: any) {
-      setLoading(false);
-      console.error('Work order creation error:', error);
-      const errorMessage = error.response?.data?.detail || error.message || 'İş emri oluşturulamadı';
-      Alert.alert('Hata', errorMessage);
+      Alert.alert('Hata', error.message || 'İş emri oluşturulamadı');
     }
   };
 
