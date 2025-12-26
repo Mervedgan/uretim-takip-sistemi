@@ -14,19 +14,32 @@ const apiClient = axios.create({
 // 2. ÖNEMLİ: TOKEN EKLEME (Her istekten önce çalışır)
 apiClient.interceptors.request.use(
   async (config) => {
-    // Telefondan token'ı oku
-    const token = await AsyncStorage.getItem('userToken');
-    
-    // Eğer token varsa, mektubun üzerine yapıştır
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-      console.log("🔑 Token eklendi:", token.substring(0, 10) + "...");
-    } else {
-      console.log("⚠️ Token bulunamadı! İstek tokensiz gidiyor.");
+    try {
+      // Telefondan token'ı oku
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // Eğer token varsa, mektubun üzerine yapıştır
+      if (token && token.trim()) {
+        // Headers'ı garanti et - Axios tip güvenliği için
+        if (!config.headers) {
+          config.headers = {} as any;
+        }
+        // Authorization header'ı ekle
+        (config.headers as any)['Authorization'] = `Bearer ${token.trim()}`;
+        console.log("🔑 Token eklendi:", token.substring(0, 20) + "...");
+        console.log("📤 Request:", config.method?.toUpperCase(), config.baseURL + config.url);
+      } else {
+        console.log("⚠️ Token bulunamadı veya boş! İstek tokensiz gidiyor.");
+        console.log("📤 Request:", config.method?.toUpperCase(), config.baseURL + config.url);
+      }
+      return config;
+    } catch (error) {
+      console.error("❌ Token ekleme hatası:", error);
+      return config;
     }
-    return config;
   },
   (error) => {
+    console.error("❌ Request interceptor error:", error);
     return Promise.reject(error);
   }
 );
