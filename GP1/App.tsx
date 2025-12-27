@@ -99,12 +99,11 @@ function App() {
     if (!user) return null;
 
     switch (user.role) {
-      case 'operator':
       case 'worker':
         return <OperatorScreen user={user} onBack={handleBackToDashboard} />;
       case 'planner':
         return <PlannerScreen user={user} onBack={handleBackToDashboard} />;
-      case 'manager':
+      case 'admin':
         return <ManagerScreen user={user} onBack={handleBackToDashboard} />;
       default:
         return <DashboardScreen user={user} onLogout={handleLogout} onNavigateToRoleScreen={handleNavigateToRoleScreen} />;

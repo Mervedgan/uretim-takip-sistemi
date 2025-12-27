@@ -298,19 +298,18 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const getRoleDisplayName = (role: string) => {
     switch (role) {
-      case 'operator': return 'Operatör';
+      case 'worker': return 'Operatör';
       case 'planner': return 'Planlayıcı';
-      case 'manager': return 'Yönetici';
+      case 'admin': return 'Yönetici';
       default: return role;
     }
   };
 
   const getRoleScreenName = () => {
     switch (user.role) {
-      case 'operator':
       case 'worker': return 'ÜRETİM GİRİŞİ';
       case 'planner': return 'MAKİNE RAPORLARI';
-      case 'manager': return 'YÖNETİM PANELİ';
+      case 'admin': return 'YÖNETİM PANELİ';
       default: return 'ÜRETİM GİRİŞİ';
     }
   };

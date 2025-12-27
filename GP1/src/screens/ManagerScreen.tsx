@@ -10,44 +10,238 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { User, ProductionRecord, Machine, ProductionAnalysis, OperatorPerformance, MachinePerformance, DailyProduction } from '../types';
-import { productionStore } from '../data/productionStore';
+import { workOrdersAPI, machinesAPI } from '../utils/api';
 
 interface ManagerScreenProps {
   user: User;
   onBack: () => void;
 }
 
+// Backend veri tipleri
+interface WorkOrder {
+  id: number;
+  product_code: string;
+  lot_no: string;
+  qty: number;
+  planned_start: string;
+  planned_end: string;
+  created_by?: number | null;
+  created_by_username?: string;
+}
+
+interface WorkOrderStage {
+  id: number;
+  work_order_id: number;
+  stage_name: string;
+  planned_start: string | null;
+  planned_end: string | null;
+  actual_start: string | null;
+  actual_end: string | null;
+  status: 'planned' | 'in_progress' | 'done';
+}
+
+interface BackendMachine {
+  id: number;
+  name: string;
+  machine_type: string;
+  location: string | null;
+  status: string;
+}
+
 const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
   const [activeProductions, setActiveProductions] = useState<ProductionRecord[]>([]);
   const [productionAnalysis, setProductionAnalysis] = useState<ProductionAnalysis | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const calculateAnalysis = () => {
-      const allProductions = productionStore.getAll();
-      const active = productionStore.getActive();
+  // Backend'den veri yükle
+  const loadBackendData = async () => {
+    try {
+      setLoading(true);
       
-      // Makine listesini oluştur
-      const machineMap = new Map<string, Machine>();
-      allProductions.forEach(production => {
-        if (!machineMap.has(production.machineId)) {
-          const activeProduction = active.find(p => p.machineId === production.machineId);
-          let status: 'running' | 'stopped' | 'maintenance' = 'stopped';
-          if (activeProduction) {
-            status = activeProduction.status === 'active' ? 'running' : 'stopped';
-          }
-          machineMap.set(production.machineId, {
-            id: production.machineId,
-            name: `Makine ${production.machineId}`,
-            status: status,
-          });
+      // Work orders yükle
+      const woResponse = await workOrdersAPI.getWorkOrders();
+      const woData = woResponse.data || woResponse;
+      const allWorkOrders: WorkOrder[] = Array.isArray(woData) ? woData : [];
+
+      // Her work order için stages yükle
+      const stagesMap = new Map<number, WorkOrderStage[]>();
+      for (const wo of allWorkOrders) {
+        try {
+          const stages = await workOrdersAPI.getWorkOrderStages(wo.id);
+          stagesMap.set(wo.id, Array.isArray(stages) ? stages : []);
+        } catch (error) {
+          console.error(`Error loading stages for WO ${wo.id}:`, error);
+          stagesMap.set(wo.id, []);
         }
+      }
+
+      // Machines yükle
+      const machinesResponse = await machinesAPI.getMachines();
+      const machinesData = machinesResponse.data || machinesResponse;
+      const allMachines = Array.isArray(machinesData) ? machinesData : [];
+
+      // Aktif work orders'ları ProductionRecord formatına dönüştür
+      const activeWOs = allWorkOrders.filter(wo => {
+        const stages = stagesMap.get(wo.id) || [];
+        // En az bir stage in_progress veya done ise aktif
+        return stages.some(s => s.status === 'in_progress' || s.status === 'done');
+      });
+
+      const productionRecords: ProductionRecord[] = activeWOs.map(wo => {
+        const stages = stagesMap.get(wo.id) || [];
+        const firstStage = stages[0];
+        const inProgressStage = stages.find(s => s.status === 'in_progress');
+        const doneStages = stages.filter(s => s.status === 'done');
+        
+        // Başlangıç zamanı
+        const startTime = inProgressStage?.actual_start || 
+                         doneStages[0]?.actual_start || 
+                         firstStage?.planned_start || 
+                         wo.planned_start;
+
+        // Cycle time hesapla
+        let cycleTime: number | undefined = 3;
+        if (doneStages.length > 0 && doneStages[0].actual_start && doneStages[0].actual_end) {
+          const stageDuration = (new Date(doneStages[0].actual_end).getTime() - 
+                                 new Date(doneStages[0].actual_start).getTime()) / 1000;
+          if (wo.qty > 0 && stageDuration > 0) {
+            cycleTime = Math.max(1, Math.floor(stageDuration / wo.qty));
+          }
+        }
+
+        // Üretilen miktar
+        let producedCount = 0;
+        if (inProgressStage && inProgressStage.actual_start) {
+          const startTime = new Date(inProgressStage.actual_start);
+          const now = new Date();
+          const elapsedSeconds = (now.getTime() - startTime.getTime()) / 1000;
+          producedCount = Math.floor(elapsedSeconds / (cycleTime || 3));
+          if (producedCount > wo.qty) {
+            producedCount = wo.qty;
+          }
+        } else if (doneStages.length > 0) {
+          producedCount = wo.qty;
+        }
+
+        // Makine seç
+        const machineIndex = wo.id % (allMachines.length || 1);
+        const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
+
+        return {
+          id: `WO-${wo.id}`,
+          machineId: machine.id.toString(),
+          operatorId: wo.created_by?.toString() || 'unknown',
+          operatorName: wo.created_by_username || 'Bilinmeyen',
+          productName: wo.product_code || wo.lot_no,
+          startTime: new Date(startTime),
+          partCount: producedCount,
+          targetCount: wo.qty,
+          cycleTime: cycleTime,
+          status: inProgressStage ? 'active' as const : 'paused' as const,
+          stages: stages.map((s, idx) => ({
+            id: `stage-${s.id}`,
+            name: s.stage_name,
+            order: idx + 1,
+            status: s.status === 'done' ? 'completed' as const :
+                   s.status === 'in_progress' ? 'in_progress' as const :
+                   'pending' as const,
+            startTime: s.actual_start ? new Date(s.actual_start) : undefined,
+            endTime: s.actual_end ? new Date(s.actual_end) : undefined,
+          })),
+        };
+      });
+
+      setActiveProductions(productionRecords);
+
+      // Tüm work orders'ları kullanarak analiz hesapla (hem aktif hem tamamlanmış)
+      const allProductionRecords: ProductionRecord[] = allWorkOrders.map(wo => {
+        const stages = stagesMap.get(wo.id) || [];
+        const firstStage = stages[0];
+        const inProgressStage = stages.find(s => s.status === 'in_progress');
+        const doneStages = stages.filter(s => s.status === 'done');
+        
+        const startTime = inProgressStage?.actual_start || 
+                         doneStages[0]?.actual_start || 
+                         firstStage?.planned_start || 
+                         wo.planned_start;
+        
+        const endTime = doneStages.length === stages.length && doneStages[doneStages.length - 1]?.actual_end
+          ? new Date(doneStages[doneStages.length - 1].actual_end)
+          : undefined;
+
+        let cycleTime: number | undefined = 3;
+        if (doneStages.length > 0 && doneStages[0].actual_start && doneStages[0].actual_end) {
+          const stageDuration = (new Date(doneStages[0].actual_end).getTime() - 
+                                 new Date(doneStages[0].actual_start).getTime()) / 1000;
+          if (wo.qty > 0 && stageDuration > 0) {
+            cycleTime = Math.max(1, Math.floor(stageDuration / wo.qty));
+          }
+        }
+
+        let producedCount = wo.qty;
+        if (inProgressStage && inProgressStage.actual_start) {
+          const startTime = new Date(inProgressStage.actual_start);
+          const now = new Date();
+          const elapsedSeconds = (now.getTime() - startTime.getTime()) / 1000;
+          producedCount = Math.floor(elapsedSeconds / (cycleTime || 3));
+          if (producedCount > wo.qty) {
+            producedCount = wo.qty;
+          }
+        }
+
+        const machineIndex = wo.id % (allMachines.length || 1);
+        const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
+
+        return {
+          id: `WO-${wo.id}`,
+          machineId: machine.id.toString(),
+          operatorId: wo.created_by?.toString() || 'unknown',
+          operatorName: wo.created_by_username || 'Bilinmeyen',
+          productName: wo.product_code || wo.lot_no,
+          startTime: new Date(startTime),
+          endTime: endTime,
+          partCount: producedCount,
+          targetCount: wo.qty,
+          cycleTime: cycleTime,
+          status: (inProgressStage ? 'active' : doneStages.length === stages.length ? 'completed' : 'paused') as const,
+        };
+      });
+
+      // Analiz hesapla
+      calculateAnalysis(allProductionRecords, allMachines);
+    } catch (error: any) {
+      console.error('Error loading backend data:', error);
+      setActiveProductions([]);
+      calculateAnalysis([], []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateAnalysis = (allProductions: ProductionRecord[], allMachines: BackendMachine[]) => {
+      
+      // Makine listesini backend'den al
+      const machineMap = new Map<string, Machine>();
+      allMachines.forEach(machine => {
+        const machineProductions = allProductions.filter(p => p.machineId === machine.id.toString());
+        const activeProduction = machineProductions.find(p => p.status === 'active');
+        let status: 'running' | 'stopped' | 'maintenance' = 'stopped';
+        if (activeProduction) {
+          status = 'running';
+        }
+        machineMap.set(machine.id.toString(), {
+          id: machine.id.toString(),
+          name: machine.name || `Makine ${machine.id}`,
+          status: status,
+        });
       });
       setMachines(Array.from(machineMap.values()));
       
-      // Toplam üretim sayısı
+      // Toplam üretim sayısı (tüm work orders)
       const totalProductions = allProductions.length;
       
       // Toplam parça sayısı
@@ -211,21 +405,19 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
         machinePerformance,
         dailyProduction: dailyProduction.slice(0, 7), // Son 7 gün
       });
-    };
+  };
+
+  // Component mount olduğunda backend'den veri yükle
+  useEffect(() => {
+    loadBackendData();
     
-    const updateProductions = () => {
-      const active = productionStore.getActive();
-      setActiveProductions([...active]);
-      calculateAnalysis();
-    };
-    
-    updateProductions();
-    const interval = setInterval(updateProductions, 1000);
+    // Her 5 saniyede bir yenile
+    const interval = setInterval(loadBackendData, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  const formatDate = (date: string) => {
-    const d = new Date(date);
+  const formatDate = (date: string | Date) => {
+    const d = date instanceof Date ? date : new Date(date);
     return d.toLocaleDateString('tr-TR', {
       day: '2-digit',
       month: '2-digit',
@@ -264,7 +456,9 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
         {/* Aktif Üretimler ve Sorun Bildirimleri */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Aktif Üretimler ve Makine Durumları</Text>
-          {activeProductions.length === 0 ? (
+          {loading ? (
+            <ActivityIndicator size="small" color="#e74c3c" style={{ marginVertical: 20 }} />
+          ) : activeProductions.length === 0 ? (
             <Text style={styles.emptyText}>Aktif üretim bulunmamaktadır.</Text>
           ) : (
             activeProductions.map((production: ProductionRecord) => {
@@ -289,7 +483,7 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
                     Operatör: {production.operatorName}
                   </Text>
                   <Text style={styles.productionDetail}>
-                    Başlangıç: {formatDateTime(new Date(production.startTime))}
+                    Başlangıç: {formatDateTime(production.startTime)}
                   </Text>
                   
                   {/* Sorun Bildirimi - Geçmiş sorun bildirimleri (aktif olsa bile) */}

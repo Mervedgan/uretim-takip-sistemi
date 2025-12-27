@@ -24,6 +24,7 @@ class WorkOrder(Base):
     qty = Column(Integer)
     planned_start = Column(DateTime, nullable=True)
     planned_end = Column(DateTime, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # Work order'ı oluşturan kullanıcı
 
 
 # 🔄 İş Emri Aşamaları tablosu

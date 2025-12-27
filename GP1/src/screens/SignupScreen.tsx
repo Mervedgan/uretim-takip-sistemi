@@ -81,8 +81,8 @@ const SignupScreen: React.FC<SignupScreenProps> = ({ onBack }) => {
     }
     
     const roleLower = formData.role.trim().toLowerCase();
-    if (!['operator', 'planner', 'manager'].includes(roleLower)) {
-      return 'Kullanıcı rolü operator, planner veya manager olmalıdır!';
+    if (!['worker', 'planner', 'admin'].includes(roleLower)) {
+      return 'Kullanıcı rolü worker, planner veya admin olmalıdır!';
     }
     
     return null;
@@ -125,9 +125,9 @@ const SignupScreen: React.FC<SignupScreenProps> = ({ onBack }) => {
   const getDepartment = (role: string): string => {
     const roleLower = role.toLowerCase();
     const departmentMap: Record<string, string> = {
-      operator: 'Üretim',
+      worker: 'Üretim',
       planner: 'Planlama',
-      manager: 'Yönetim',
+      admin: 'Yönetim',
     };
     return departmentMap[roleLower] || 'Genel';
   };
@@ -260,7 +260,7 @@ const SignupScreen: React.FC<SignupScreenProps> = ({ onBack }) => {
     { 
       key: 'role' as keyof FormData, 
       label: 'Kullanıcı Rolü', 
-      placeholder: 'operator, planner veya manager', 
+      placeholder: 'worker, planner veya admin', 
       autoCapitalize: 'none' as const 
     },
   ];

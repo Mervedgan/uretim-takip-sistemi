@@ -2,8 +2,8 @@
  * Kalıp Üretim Takip Sistemi - Type Definitions
  */
 
-// Kullanıcı Rolleri: operator, planner, manager
-export type UserRole = 'operator' | 'planner' | 'manager';
+// Kullanıcı Rolleri: worker, planner, admin (backend ile uyumlu)
+export type UserRole = 'worker' | 'planner' | 'admin';
 
 export interface User {
   id: string;

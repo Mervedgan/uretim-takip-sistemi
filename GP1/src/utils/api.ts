@@ -131,7 +131,7 @@ export const authAPI = {
           id: userData.id?.toString() || userData.user_id?.toString() || '1',
           username: userData.username || username.trim(),
           password: '', // Şifreyi saklamıyoruz
-          role: userData.role || 'operator',
+          role: userData.role || 'worker',
           name: userData.name || userData.username || username.trim(),
           department: userData.department || undefined,
           phone: userData.phone || undefined,
@@ -154,7 +154,7 @@ export const authAPI = {
               id: '1',
               username: decodedUsername || username.trim(),
               password: '',
-              role: decodedRole || 'operator', // Token'dan gelen role bilgisini kullan
+              role: decodedRole || 'worker', // Token'dan gelen role bilgisini kullan
               name: decodedUsername || username.trim(),
             };
           } else {
@@ -167,7 +167,7 @@ export const authAPI = {
             id: '1',
             username: username.trim(),
             password: '',
-            role: 'operator', // Son çare: varsayılan rol
+            role: 'worker', // Son çare: varsayılan rol
             name: username.trim(),
           };
         }

@@ -2,7 +2,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db import get_db
-from app.models import WorkOrder, WorkOrderStage
+from app.models import WorkOrder, WorkOrderStage, User
 from app.schemas import WorkOrderCreate
 from app.routers.auth import require_roles, get_current_user
 
@@ -38,6 +38,7 @@ def create_work_order(
         qty=wo_data.qty,
         planned_start=wo_data.planned_start,
         planned_end=wo_data.planned_end,
+        created_by=current_user["user_id"],  # Work order'ı oluşturan kullanıcının ID'si
     )
 
     db.add(wo)
@@ -98,9 +99,28 @@ def list_work_orders(
     """
     work_orders = db.query(WorkOrder).all()
     
+    # Work order'ları serialize ederken created_by kullanıcı bilgisini ekle
+    result = []
+    for wo in work_orders:
+        wo_dict = {
+            "id": wo.id,
+            "product_code": wo.product_code,
+            "lot_no": wo.lot_no,
+            "qty": wo.qty,
+            "planned_start": wo.planned_start.isoformat() if wo.planned_start else None,
+            "planned_end": wo.planned_end.isoformat() if wo.planned_end else None,
+            "created_by": wo.created_by,
+        }
+        # created_by kullanıcısının username'ini ekle
+        if wo.created_by:
+            creator = db.query(User).filter(User.id == wo.created_by).first()
+            if creator:
+                wo_dict["created_by_username"] = creator.username
+        result.append(wo_dict)
+    
     return {
         "total": len(work_orders),
-        "data": work_orders,
+        "data": result,
         "requested_by": current_user["username"]
     }
 
