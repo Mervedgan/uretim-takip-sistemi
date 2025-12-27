@@ -53,6 +53,22 @@ export interface ProductionRecord {
   stages?: ProductionStage[]; // Üretim aşamaları
   issue?: string; // Sorun bildirimi (makine durdurulduğunda)
   pausedAt?: Date; // Durdurulma zamanı
+  moldData?: { // Mold bilgileri (database'den)
+    id: number;
+    name: string;
+    code: string;
+    cycle_time_sec?: number;
+    hourly_production?: number;
+    injection_temp_c?: number;
+    mold_temp_c?: number;
+    material?: string;
+    part_weight_g?: number;
+  };
+  productData?: { // Product bilgileri (database'den)
+    id: number;
+    code: string;
+    name: string;
+  };
 }
 
 // Makine performans metrikleri - Planlayıcı için

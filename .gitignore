@@ -66,12 +66,17 @@ backend/**/__pycache__/
 backend/**/*.pyc
 backend/**/*.pyo
 
-# GP1 - Expo ve React Native kalıntıları (isteğe bağlı - sadece backend commit edilecekse)
-# GP1/node_modules/
-# GP1/.expo/
-# GP1/.expo-shared/
-# GP1/dist/
-# GP1/web-build/
+# GP1 - Expo ve React Native
+GP1/node_modules/
+GP1/.expo/
+GP1/.expo-shared/
+GP1/dist/
+GP1/web-build/
+GP1/android/app/build/
+GP1/android/build/
+GP1/ios/Pods/
+GP1/ios/build/
+*.log
 
 
 

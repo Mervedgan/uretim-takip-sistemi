@@ -1,7 +1,6 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// Eğer apiConfig dosyan yoksa veya hataysa, URL'i aşağıda elle yazdım.
-// import { API_BASE_URL, API_ENDPOINTS } from './apiConfig';
+import { API_BASE_URL } from './apiConfig';
 
 // Base64 decode helper (React Native için)
 function base64Decode(str: string): string {
@@ -39,7 +38,8 @@ function base64Decode(str: string): string {
 
 // 1. İŞÇİYİ OLUŞTUR (Genel İstek Aracı)
 const apiClient = axios.create({
-  baseURL: 'http://10.0.2.2:8000', // Android Emülatör için standart adres
+  baseURL: API_BASE_URL, // apiConfig.ts'den alınan URL
+  timeout: 10000, // 10 saniye timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -79,28 +79,8 @@ apiClient.interceptors.request.use(
 );
 
 // 3. SERVİSLERİ TANIMLA
-export const productionAPI = {
-  // Kalıpları Getir
-  async getMolds() {
-    // apiClient kullanıyoruz ki token eklensin!
-    return apiClient.get('/molds'); 
-  },
-
-  // Üretim Verilerini Getir (Dashboard için)
-  async getProduction() {
-    return apiClient.get('/production');
-  },
-
-  // Metrikleri Getir
-  async getMetrics() {
-    return apiClient.get('/production/metrics');
-  },
-  
-  // Ürünleri Getir
-  async getProducts() {
-      return apiClient.get('/products');
-  }
-};
+// Not: productionAPI kaldırıldı - moldsAPI ve productsAPI kullanılmalı
+// Legacy endpoint'ler (/production, /production/metrics) backend'de yok
 
 export const authAPI = {
   async login(username: string, password: string) {
@@ -255,17 +235,38 @@ export const authAPI = {
       if (!token) {
         throw new Error('Token bulunamadı');
       }
-      // Token'dan user bilgisini decode etmek için backend'e istek atabiliriz
-      // Şimdilik token'dan user bilgisini çıkaramıyoruz, bu yüzden storage'dan alalım
-      // Backend'de /auth/me endpoint'i yok, bu yüzden tokenStorage'dan alıyoruz
-      const user = await AsyncStorage.getItem('user');
-      if (user) {
-        return JSON.parse(user);
-      }
-      throw new Error('Kullanıcı bilgisi bulunamadı');
+      // Backend'den kullanıcı bilgisini al
+      const response = await apiClient.get('/auth/me');
+      const userData = response.data;
+      
+      // User bilgisini formatla
+      const user = {
+        id: userData.id?.toString() || userData.user_id?.toString() || '1',
+        username: userData.username || '',
+        password: '', // Şifreyi saklamıyoruz
+        role: userData.role || 'worker',
+        name: userData.name || userData.username || '',
+        department: userData.department || undefined,
+        phone: userData.phone || undefined,
+        email: userData.email || undefined,
+      };
+      
+      // User bilgisini de kaydet (offline kullanım için)
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+      
+      return user;
     } catch (error: any) {
       console.error('Get current user error:', error);
-      throw new Error(error.message || 'Kullanıcı bilgisi alınamadı');
+      // Fallback: Storage'dan al
+      try {
+        const user = await AsyncStorage.getItem('user');
+        if (user) {
+          return JSON.parse(user);
+        }
+      } catch (storageError) {
+        // Storage'dan da alınamazsa hata fırlat
+      }
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcı bilgisi alınamadı');
     }
   },
 
@@ -294,7 +295,7 @@ export const authAPI = {
 export const workOrdersAPI = {
   async getWorkOrders() {
     try {
-      const response = await apiClient.get('/workorders/');
+      const response = await apiClient.get('/workorders');
       return response.data;
     } catch (error: any) {
       console.error('Error getting work orders:', error);
@@ -330,7 +331,7 @@ export const workOrdersAPI = {
     planned_end: string;
   }) {
     try {
-      const response = await apiClient.post('/workorders/', data);
+      const response = await apiClient.post('/workorders', data);
       return response.data;
     } catch (error: any) {
       console.error('Error creating work order:', error);
@@ -345,7 +346,7 @@ export const workOrdersAPI = {
 export const machinesAPI = {
   async getMachines() {
     try {
-      const response = await apiClient.get('/machines/');
+      const response = await apiClient.get('/machines');
       return response.data;
     } catch (error: any) {
       console.error('Error getting machines:', error);
@@ -373,11 +374,25 @@ export const machinesAPI = {
     status?: string;
   }) {
     try {
-      const response = await apiClient.post('/machines/', data);
+      const response = await apiClient.post('/machines', data);
       return response.data;
     } catch (error: any) {
       console.error('Error creating machine:', error);
       throw new Error(error.response?.data?.detail || error.message || 'Makine oluşturulamadı');
+    }
+  },
+
+  async postMachineReading(machineId: number, data: {
+    reading_type: string;
+    value: string;
+    timestamp?: string;
+  }) {
+    try {
+      const response = await apiClient.post(`/machines/${machineId}/readings`, data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error posting machine reading:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Makine okuması gönderilemedi');
     }
   },
 };
@@ -388,11 +403,20 @@ export const machinesAPI = {
 export const stagesAPI = {
   async startStage(stageId: number) {
     try {
+      if (!stageId || typeof stageId !== 'number') {
+        throw new Error(`Geçersiz stage ID: ${stageId}`);
+      }
       const response = await apiClient.post(`/stages/${stageId}/start`);
       return response.data;
     } catch (error: any) {
-      console.error('Error starting stage:', error);
-      throw new Error(error.response?.data?.detail || error.message || 'Aşama başlatılamadı');
+      const errorDetail = error.response?.data?.detail || error.message || 'Aşama başlatılamadı';
+      console.error('Error starting stage:', {
+        stageId,
+        status: error.response?.status,
+        detail: errorDetail,
+        fullError: error
+      });
+      throw new Error(errorDetail);
     }
   },
 
@@ -423,7 +447,7 @@ export const stagesAPI = {
 export const productsAPI = {
   async getProducts() {
     try {
-      const response = await apiClient.get('/products/');
+      const response = await apiClient.get('/products');
       return response.data;
     } catch (error: any) {
       console.error('Error getting products:', error);
@@ -440,6 +464,53 @@ export const productsAPI = {
       throw new Error(error.response?.data?.detail || error.message || 'Ürün yüklenemedi');
     }
   },
+
+  async createProduct(data: {
+    code: string;
+    name: string;
+    description?: string;
+  }) {
+    try {
+      const response = await apiClient.post('/products', data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error creating product:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürün oluşturulamadı');
+    }
+  },
+
+  async updateProduct(productId: number, data: {
+    name?: string;
+    description?: string;
+  }) {
+    try {
+      const response = await apiClient.patch(`/products/${productId}`, data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error updating product:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürün güncellenemedi');
+    }
+  },
+
+  async deleteProduct(productId: number) {
+    try {
+      const response = await apiClient.delete(`/products/${productId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error deleting product:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürün silinemedi');
+    }
+  },
+
+  async restoreProduct(productId: number) {
+    try {
+      const response = await apiClient.post(`/products/${productId}/restore`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error restoring product:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürün geri yüklenemedi');
+    }
+  },
 };
 
 /**
@@ -448,7 +519,7 @@ export const productsAPI = {
 export const moldsAPI = {
   async getMolds() {
     try {
-      const response = await apiClient.get('/molds/');
+      const response = await apiClient.get('/molds');
       return response.data;
     } catch (error: any) {
       console.error('Error getting molds:', error);
@@ -463,6 +534,188 @@ export const moldsAPI = {
     } catch (error: any) {
       console.error('Error getting mold:', error);
       throw new Error(error.response?.data?.detail || error.message || 'Kalıp yüklenemedi');
+    }
+  },
+
+  async createMold(data: {
+    code: string;
+    name: string;
+    description?: string;
+    product_id?: number;
+    status?: string;
+    cavity_count?: number;
+    cycle_time_sec?: number;
+    injection_temp_c?: number;
+    mold_temp_c?: number;
+    material?: string;
+    part_weight_g?: number;
+    hourly_production?: number;
+  }) {
+    try {
+      const response = await apiClient.post('/molds', data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error creating mold:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kalıp oluşturulamadı');
+    }
+  },
+
+  async updateMold(moldId: number, data: {
+    name?: string;
+    description?: string;
+    product_id?: number;
+    status?: string;
+    cavity_count?: number;
+    cycle_time_sec?: number;
+    injection_temp_c?: number;
+    mold_temp_c?: number;
+    material?: string;
+    part_weight_g?: number;
+    hourly_production?: number;
+  }) {
+    try {
+      const response = await apiClient.patch(`/molds/${moldId}`, data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error updating mold:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kalıp güncellenemedi');
+    }
+  },
+
+  async deleteMold(moldId: number) {
+    try {
+      const response = await apiClient.delete(`/molds/${moldId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error deleting mold:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kalıp silinemedi');
+    }
+  },
+
+  async restoreMold(moldId: number) {
+    try {
+      const response = await apiClient.post(`/molds/${moldId}/restore`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error restoring mold:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kalıp geri yüklenemedi');
+    }
+  },
+};
+
+/**
+ * Metrics API
+ */
+export const metricsAPI = {
+  async getWorkOrderMetrics(woId: number) {
+    try {
+      const response = await apiClient.get(`/metrics/workorders/${woId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting work order metrics:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'İş emri metrikleri yüklenemedi');
+    }
+  },
+
+  async getStageMetrics(stageId: number) {
+    try {
+      const response = await apiClient.get(`/metrics/stages/${stageId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting stage metrics:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Aşama metrikleri yüklenemedi');
+    }
+  },
+};
+
+/**
+ * Auth API (Admin functions)
+ */
+export const adminAPI = {
+  async listUsers() {
+    try {
+      const response = await apiClient.get('/auth/users');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting users:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcılar yüklenemedi');
+    }
+  },
+
+  async changeUserRole(userId: number, role: string) {
+    try {
+      const response = await apiClient.patch(`/auth/users/${userId}/role`, { role });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error changing user role:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcı rolü değiştirilemedi');
+    }
+  },
+
+  async deleteUser(userId: number) {
+    try {
+      const response = await apiClient.delete(`/auth/users/${userId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcı silinemedi');
+    }
+  },
+};
+
+/**
+ * Issues API (Admin/Planner)
+ */
+export const issuesAPI = {
+  async listIssues(filters?: {
+    status?: string;
+    type?: string;
+    work_order_stage_id?: number;
+  }) {
+    try {
+      const params = new URLSearchParams();
+      if (filters?.status) params.append('status', filters.status);
+      if (filters?.type) params.append('type', filters.type);
+      if (filters?.work_order_stage_id) params.append('work_order_stage_id', filters.work_order_stage_id.toString());
+      
+      const queryString = params.toString();
+      const url = queryString ? `/issues?${queryString}` : '/issues';
+      const response = await apiClient.get(url);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting issues:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Sorunlar yüklenemedi');
+    }
+  },
+
+  async updateIssueStatus(issueId: number, newStatus: string) {
+    try {
+      const response = await apiClient.patch(`/issues/${issueId}/status?new_status=${newStatus}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error updating issue status:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Sorun durumu güncellenemedi');
+    }
+  },
+
+  async getNotifications(read?: boolean) {
+    try {
+      const params = read !== undefined ? `?read=${read ? 'true' : 'false'}` : '';
+      const response = await apiClient.get(`/issues/notifications${params}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting notifications:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Bildirimler yüklenemedi');
+    }
+  },
+
+  async markNotificationRead(notificationId: number) {
+    try {
+      const response = await apiClient.patch(`/issues/notifications/${notificationId}/read`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error marking notification as read:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Bildirim okundu olarak işaretlenemedi');
     }
   },
 };

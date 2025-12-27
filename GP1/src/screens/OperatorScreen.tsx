@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { User, ProductionRecord, ProductionStage } from '../types';
 import { productionStore } from '../data/productionStore';
-import { workOrdersAPI, machinesAPI, stagesAPI, metricsAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, stagesAPI, metricsAPI, productsAPI } from '../utils/api';
 
 interface OperatorScreenProps {
   user: User;
@@ -73,15 +73,26 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
   const [selectedMachine, setSelectedMachine] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [processingStageId, setProcessingStageId] = useState<number | null>(null);
 
   // Form state
+  const [productCode, setProductCode] = useState('');
   const [productName, setProductName] = useState('');
+  const [lotNo, setLotNo] = useState('');
   const [targetCount, setTargetCount] = useState('');
   const [cycleTime, setCycleTime] = useState('');
   const [machineId, setMachineId] = useState('');
   const [stageCount, setStageCount] = useState('');
   const [stageNames, setStageNames] = useState<string[]>([]);
   const [showStages, setShowStages] = useState(false);
+  const [products, setProducts] = useState<any[]>([]);
+
+  // Load products when new production tab is active
+  useEffect(() => {
+    if (activeTab === 'new') {
+      loadProducts();
+    }
+  }, [activeTab]);
 
   // Load dashboard data
   useEffect(() => {
@@ -99,6 +110,16 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       return () => clearInterval(interval);
     }
   }, [activeTab]);
+
+  const loadProducts = async () => {
+    try {
+      const productsResponse = await productsAPI.getProducts();
+      const allProducts = Array.isArray(productsResponse) ? productsResponse : [];
+      setProducts(allProducts);
+    } catch (error: any) {
+      console.error('Error loading products:', error);
+    }
+  };
 
   const loadDashboardData = async () => {
     try {
@@ -152,26 +173,46 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
   };
 
   const handleStartStage = async (stageId: number) => {
+    if (processingStageId !== null) {
+      return; // Already processing
+    }
+    
     try {
+      setProcessingStageId(stageId);
+      console.log('Starting stage:', stageId);
       await stagesAPI.startStage(stageId);
       Alert.alert('Başarılı', 'Aşama başlatıldı!');
       if (selectedWorkOrder) {
-        loadWorkOrderStages(selectedWorkOrder);
+        await loadWorkOrderStages(selectedWorkOrder);
       }
+      loadDashboardData(); // Refresh dashboard
     } catch (error: any) {
+      console.error('Error starting stage:', error);
       Alert.alert('Hata', error.message || 'Aşama başlatılamadı');
+    } finally {
+      setProcessingStageId(null);
     }
   };
 
   const handleDoneStage = async (stageId: number) => {
+    if (processingStageId !== null) {
+      return; // Already processing
+    }
+    
     try {
+      setProcessingStageId(stageId);
+      console.log('Completing stage:', stageId);
       await stagesAPI.doneStage(stageId);
       Alert.alert('Başarılı', 'Aşama tamamlandı!');
       if (selectedWorkOrder) {
-        loadWorkOrderStages(selectedWorkOrder);
+        await loadWorkOrderStages(selectedWorkOrder);
       }
+      loadDashboardData(); // Refresh dashboard
     } catch (error: any) {
+      console.error('Error completing stage:', error);
       Alert.alert('Hata', error.message || 'Aşama tamamlanamadı');
+    } finally {
+      setProcessingStageId(null);
     }
   };
 
@@ -223,64 +264,87 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       }));
   };
 
-  const handleStartProduction = () => {
-    if (!productName.trim()) {
-      Alert.alert('Hata', 'Lütfen ürün adı girin!');
+  const handleStartProduction = async () => {
+    // Validasyonlar
+    if (!productCode.trim()) {
+      Alert.alert('Hata', 'Lütfen ürün kodu girin!');
       return;
     }
 
-    if (!machineId.trim()) {
-      Alert.alert('Hata', 'Lütfen makine ID\'si girin!');
+    if (!lotNo.trim()) {
+      Alert.alert('Hata', 'Lütfen lot numarası girin!');
       return;
     }
 
-    if (!cycleTime.trim() || isNaN(parseFloat(cycleTime)) || parseFloat(cycleTime) <= 0) {
-      Alert.alert('Hata', 'Lütfen geçerli bir cycle time girin! (saniye cinsinden, örn: 5.5)');
+    if (!targetCount.trim() || isNaN(parseInt(targetCount)) || parseInt(targetCount) <= 0) {
+      Alert.alert('Hata', 'Lütfen geçerli bir hedef miktar girin!');
       return;
     }
 
-    // Aşama validasyonu
-    const stages = createStages();
-    if (stageCount && parseInt(stageCount) > 0) {
-      if (stages.length !== parseInt(stageCount)) {
-        Alert.alert('Hata', 'Lütfen tüm aşamaların isimlerini girin!');
-        return;
+    try {
+      setLoading(true);
+
+      // Tarih hesaplamaları - şimdi başla, 4 saat sonra bitir (varsayılan)
+      const now = new Date();
+      const endTime = new Date(now.getTime() + 4 * 60 * 60 * 1000); // 4 saat sonra
+
+      // Backend'e work order oluştur
+      const workOrderData = {
+        product_code: productCode.trim(),
+        lot_no: lotNo.trim(),
+        qty: parseInt(targetCount),
+        planned_start: now.toISOString(),
+        planned_end: endTime.toISOString(),
+      };
+
+      console.log('📤 OperatorScreen - Work order oluşturuluyor:', workOrderData);
+      const result = await workOrdersAPI.createWorkOrder(workOrderData);
+      
+      // Work order oluşturulduktan sonra ilk stage'i başlat
+      if (result.work_order_id && result.stages && result.stages.length > 0) {
+        const firstStageId = result.stages[0].id;
+        if (firstStageId && typeof firstStageId === 'number') {
+          try {
+            await stagesAPI.startStage(firstStageId);
+            console.log('✅ İlk stage başlatıldı:', firstStageId);
+          } catch (stageError: any) {
+            const errorMessage = stageError.response?.data?.detail || stageError.message || 'Bilinmeyen hata';
+            console.error('⚠️ Stage başlatılamadı (work order oluşturuldu):', errorMessage);
+            // Stage başlatılamasa bile devam et - work order zaten oluşturuldu
+          }
+        } else {
+          console.warn('⚠️ Stage ID geçersiz:', firstStageId);
+        }
       }
+
+      // Formu temizle
+      setProductCode('');
+      setProductName('');
+      setLotNo('');
+      setTargetCount('');
+      setCycleTime('');
+      setMachineId('');
+      setStageCount('');
+      setStageNames([]);
+      setShowStages(false);
+
+      Alert.alert(
+        'Başarılı', 
+        `Üretim başlatıldı!\nWork Order ID: ${result.work_order_id}\nDashboard'daki "Aktif Üretimler" bölümünden takip edebilirsiniz.`,
+        [{ text: 'Tamam', onPress: () => {
+          setActiveTab('dashboard');
+          loadDashboardData(); // Dashboard'ı yenile
+        }}]
+      );
+    } catch (error: any) {
+      console.error('Error creating work order:', error);
+      Alert.alert(
+        'Hata', 
+        error.response?.data?.detail || error.message || 'Üretim başlatılamadı. Lütfen tekrar deneyin.'
+      );
+    } finally {
+      setLoading(false);
     }
-
-    const now = new Date();
-    const cycleTimeValue = parseFloat(cycleTime);
-    
-    const newProduction: ProductionRecord = {
-      id: `PR${Date.now()}`,
-      machineId: machineId.trim(),
-      operatorId: user.id,
-      operatorName: user.name,
-      productName: productName.trim(),
-      startTime: now,
-      partCount: 0,
-      targetCount: targetCount ? parseInt(targetCount) : undefined,
-      cycleTime: cycleTimeValue,
-      status: 'active',
-      stages: stages.length > 0 ? stages : undefined
-    };
-
-    productionStore.add(newProduction);
-
-    // Formu temizle
-    setProductName('');
-    setTargetCount('');
-    setCycleTime('');
-    setMachineId('');
-    setStageCount('');
-    setStageNames([]);
-    setShowStages(false);
-
-    Alert.alert(
-      'Başarılı', 
-      'Üretim başlatıldı!\nDashboard\'daki "Aktif Üretimler" bölümünden takip edebilirsiniz.',
-      [{ text: 'Tamam', onPress: () => setActiveTab('dashboard') }]
-    );
   };
 
   const formatDate = (dateString: string | null) => {
@@ -334,6 +398,8 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled={true}
       >
         <View style={styles.userInfo}>
           <Text style={styles.welcomeText}>Operatör: {user.name}</Text>
@@ -404,18 +470,38 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
                 <View style={styles.stageActions}>
                   {stage.status === 'planned' && (
                     <TouchableOpacity
-                      style={[styles.actionButton, styles.startButton]}
+                      style={[
+                        styles.actionButton, 
+                        styles.startButton,
+                        processingStageId === stage.id && styles.actionButtonDisabled
+                      ]}
                       onPress={() => handleStartStage(stage.id)}
+                      disabled={processingStageId !== null}
+                      activeOpacity={0.7}
                     >
-                      <Text style={styles.actionButtonText}>Başlat</Text>
+                      {processingStageId === stage.id ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <Text style={styles.actionButtonText}>Başlat</Text>
+                      )}
                     </TouchableOpacity>
                   )}
                   {stage.status === 'in_progress' && (
                     <TouchableOpacity
-                      style={[styles.actionButton, styles.doneButton]}
+                      style={[
+                        styles.actionButton, 
+                        styles.doneButton,
+                        processingStageId === stage.id && styles.actionButtonDisabled
+                      ]}
                       onPress={() => handleDoneStage(stage.id)}
+                      disabled={processingStageId !== null}
+                      activeOpacity={0.7}
                     >
-                      <Text style={styles.actionButtonText}>Tamamla</Text>
+                      {processingStageId === stage.id ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <Text style={styles.actionButtonText}>Tamamla</Text>
+                      )}
                     </TouchableOpacity>
                   )}
                 </View>
@@ -496,31 +582,54 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
           <Text style={styles.formTitle}>Yeni Üretim Başlat</Text>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Ürün Adı *</Text>
+            <Text style={styles.label}>Ürün Kodu *</Text>
             <TextInput
               style={styles.input}
-              value={productName}
-              onChangeText={setProductName}
-              placeholder="Ürün adını girin"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Makine ID *</Text>
-            <TextInput
-              style={styles.input}
-              value={machineId}
-              onChangeText={setMachineId}
-              placeholder="Örn: M001, M002, Makine1..."
+              value={productCode}
+              onChangeText={setProductCode}
+              placeholder="Örn: PRD-001, PRD-002..."
               autoCapitalize="none"
             />
             <Text style={styles.hintText}>
-              Kullanmak istediğiniz makinenin ID'sini girin
+              Database'de kayıtlı ürün kodunu girin
+            </Text>
+            {products.length > 0 && (
+              <View style={styles.productsList}>
+                <Text style={styles.productsListTitle}>Mevcut Ürünler:</Text>
+                {products.slice(0, 5).map((product) => (
+                  <TouchableOpacity
+                    key={product.id}
+                    style={styles.productItem}
+                    onPress={() => {
+                      setProductCode(product.code);
+                      setProductName(product.name);
+                    }}
+                  >
+                    <Text style={styles.productItemText}>
+                      {product.code} - {product.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Lot Numarası *</Text>
+            <TextInput
+              style={styles.input}
+              value={lotNo}
+              onChangeText={setLotNo}
+              placeholder="Örn: LOT-001, LOT-2024-01..."
+              autoCapitalize="none"
+            />
+            <Text style={styles.hintText}>
+              Bu üretim için lot numarası girin
             </Text>
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Hedef Parça Sayısı (Opsiyonel)</Text>
+            <Text style={styles.label}>Hedef Ürün Sayısı *</Text>
             <TextInput
               style={styles.input}
               value={targetCount}
@@ -528,6 +637,9 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
               placeholder="Hedef miktarı girin"
               keyboardType="numeric"
             />
+            <Text style={styles.hintText}>
+              Üretilmesi planlanan toplam ürün sayısı
+            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -808,6 +920,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  actionButtonDisabled: {
+    opacity: 0.6,
+  },
   machineItem: {
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
@@ -903,6 +1018,30 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginTop: 5,
     fontStyle: 'italic',
+  },
+  productsList: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+  },
+  productsListTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  productItem: {
+    padding: 8,
+    marginBottom: 4,
+    backgroundColor: 'white',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  productItemText: {
+    fontSize: 14,
+    color: '#3498db',
   },
   stagesContainer: {
     backgroundColor: '#f8f9fa',

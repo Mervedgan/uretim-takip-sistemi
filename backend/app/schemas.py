@@ -37,7 +37,8 @@ class IssueCreate(BaseModel):
 class WorkOrderCreate(BaseModel):
     product_code: str
     lot_no: str
-    qty: int
+    qty: int  # Hedef ürün sayısı
+    produced_qty: Optional[int] = Field(0, ge=0)  # Mevcut üretilen ürün sayısı (varsayılan: 0)
     planned_start: datetime
     planned_end: datetime
 

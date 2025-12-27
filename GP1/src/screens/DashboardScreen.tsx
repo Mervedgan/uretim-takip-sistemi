@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { User, ProductionRecord, Machine } from '../types';
 import { productionStore } from '../data/productionStore';
-import { workOrdersAPI, machinesAPI, stagesAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, stagesAPI, productsAPI, moldsAPI } from '../utils/api';
 
 interface DashboardScreenProps {
   user: User;
@@ -34,7 +34,8 @@ interface WorkOrder {
   id: number;
   product_code: string;
   lot_no: string;
-  qty: number;
+  qty: number;  // Hedef ürün sayısı
+  produced_qty?: number;  // Mevcut üretilen ürün sayısı
   planned_start: string;
   planned_end: string;
 }
@@ -66,12 +67,27 @@ interface MachineReading {
   timestamp: string;
 }
 
-interface MachineReading {
+interface Product {
   id: number;
-  machine_id: number;
-  reading_type: string;
-  value: string;
-  timestamp: string;
+  code: string;
+  name: string;
+  description?: string;
+}
+
+interface Mold {
+  id: number;
+  code: string;
+  name: string;
+  description?: string;
+  product_id?: number;
+  status: string;
+  cavity_count?: number;
+  cycle_time_sec?: number;
+  injection_temp_c?: number;
+  mold_temp_c?: number;
+  material?: string;
+  part_weight_g?: number;
+  hourly_production?: number;
 }
 
 const DashboardScreen: React.FC<DashboardScreenProps> = ({ 
@@ -92,6 +108,10 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [workOrderStages, setWorkOrderStages] = useState<Map<number, WorkOrderStage[]>>(new Map());
   const [backendMachines, setBackendMachines] = useState<BackendMachine[]>([]);
   const [machineReadingsMap, setMachineReadingsMap] = useState<Map<number, MachineReading[]>>(new Map());
+  const [products, setProducts] = useState<Product[]>([]);
+  const [molds, setMolds] = useState<Mold[]>([]);
+  const [productCodeToProductMap, setProductCodeToProductMap] = useState<Map<string, Product>>(new Map());
+  const [productIdToMoldsMap, setProductIdToMoldsMap] = useState<Map<number, Mold[]>>(new Map());
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -125,6 +145,35 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
       const allMachines = Array.isArray(machinesData) ? machinesData : [];
       setBackendMachines(allMachines);
 
+      // Products yükle
+      const productsResponse = await productsAPI.getProducts();
+      const allProducts = Array.isArray(productsResponse) ? productsResponse : [];
+      setProducts(allProducts);
+      
+      // Product code'dan product'a mapping oluştur
+      const codeToProductMap = new Map<string, Product>();
+      allProducts.forEach((product: Product) => {
+        codeToProductMap.set(product.code, product);
+      });
+      setProductCodeToProductMap(codeToProductMap);
+
+      // Molds yükle
+      const moldsResponse = await moldsAPI.getMolds();
+      const allMolds = Array.isArray(moldsResponse) ? moldsResponse : [];
+      setMolds(allMolds);
+      
+      // Product ID'den molds'lara mapping oluştur
+      const productIdToMolds = new Map<number, Mold[]>();
+      allMolds.forEach((mold: Mold) => {
+        if (mold.product_id) {
+          if (!productIdToMolds.has(mold.product_id)) {
+            productIdToMolds.set(mold.product_id, []);
+          }
+          productIdToMolds.get(mold.product_id)!.push(mold);
+        }
+      });
+      setProductIdToMoldsMap(productIdToMolds);
+
       // Her makine için readings yükle
       const readingsMap = new Map<number, MachineReading[]>();
       for (const machine of allMachines) {
@@ -145,70 +194,57 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         return stages.some(s => s.status === 'in_progress' || s.status === 'done');
       });
 
-      const productionRecords: ProductionRecord[] = activeWOs.map(wo => {
+      // Benzersiz product'ları bul (product_code'a göre)
+      const uniqueProducts = new Map<string, { product: Product; workOrders: typeof activeWOs }>();
+      
+      for (const wo of activeWOs) {
+        const product = codeToProductMap.get(wo.product_code);
+        if (!product) continue;
+        
+        if (!uniqueProducts.has(product.code)) {
+          uniqueProducts.set(product.code, { product, workOrders: [] });
+        }
+        uniqueProducts.get(product.code)!.workOrders.push(wo);
+      }
+      
+      // İlk 4 ürünü seç (database'den - otomotiv klipsi dahil)
+      const selectedProducts = Array.from(uniqueProducts.values()).slice(0, 4);
+
+      // Product code'dan product'ı bul ve molds'ları al
+      const productionRecords: ProductionRecord[] = [];
+      
+      for (const { product, workOrders: productWorkOrders } of selectedProducts) {
+        // Bu product için ilk aktif work order'ı al
+        const wo = productWorkOrders[0];
+        
+        // Product'a ait ilk mold'u al (her ürün için 1 mold)
+        const productMolds = productIdToMolds.get(product.id) || [];
+        const mold = productMolds[0]; // İlk mold'u al
+        
         const stages = stagesMap.get(wo.id) || [];
         const firstStage = stages[0];
         const inProgressStage = stages.find(s => s.status === 'in_progress');
         const doneStages = stages.filter(s => s.status === 'done');
         
-        // Başlangıç zamanı: ilk stage'in actual_start'i varsa onu kullan, yoksa planned_start
         const startTime = inProgressStage?.actual_start || 
                          doneStages[0]?.actual_start || 
                          firstStage?.planned_start || 
                          wo.planned_start;
 
-        // Cycle time: stage'lerden hesapla veya varsayılan (önce hesapla)
-        let cycleTime: number | undefined = 3; // Varsayılan 3 saniye
-        if (doneStages.length > 0 && doneStages[0].actual_start && doneStages[0].actual_end) {
-          // Tamamlanan stage'in süresinden cycle time hesapla
-          const stageDuration = (new Date(doneStages[0].actual_end).getTime() - 
-                                 new Date(doneStages[0].actual_start).getTime()) / 1000;
-          // Stage süresini ürün sayısına böl (basit yaklaşım)
-          if (wo.qty > 0 && stageDuration > 0) {
-            cycleTime = Math.max(1, Math.floor(stageDuration / wo.qty));
-          }
-        } else if (inProgressStage && inProgressStage.actual_start) {
-          // İn progress stage varsa, geçen süreye göre tahmin et
-          const elapsed = (new Date().getTime() - new Date(inProgressStage.actual_start).getTime()) / 1000;
-          // Üretilen miktara göre cycle time tahmin et (basit yaklaşım)
-          const estimatedProduced = Math.max(1, Math.floor(elapsed / 3)); // Varsayılan 3 saniye cycle time ile
-          if (estimatedProduced > 0 && elapsed > 0) {
-            cycleTime = Math.max(1, Math.floor(elapsed / estimatedProduced));
-          }
-        }
-
-        // Üretilen miktar: in_progress veya done stage varsa, geçen süreye göre hesapla
-        let producedCount = 0;
-        if (inProgressStage && inProgressStage.actual_start) {
-          // İn progress stage varsa, başlangıçtan itibaren geçen süreye göre hesapla
-          const startTime = new Date(inProgressStage.actual_start);
-          const now = new Date();
-          const elapsedSeconds = (now.getTime() - startTime.getTime()) / 1000;
-          producedCount = Math.floor(elapsedSeconds / (cycleTime || 3));
-          // Hedef miktarı geçmesin
-          if (producedCount > wo.qty) {
-            producedCount = wo.qty;
-          }
-        } else if (doneStages.length > 0) {
-          // Tüm stage'ler tamamlandıysa, hedef miktarı göster
-          producedCount = wo.qty;
-        }
-
-        // Makineyi work order'dan veya aktif makinelerden bul
-        // Basit eşleştirme: work order ID'sine göre makine seç
         const machineIndex = wo.id % (allMachines.length || 1);
         const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
 
-        return {
-          id: `WO-${wo.id}`,
+        // Her ürün için 1 production record oluştur (mold varsa mold bilgileriyle, yoksa sadece product bilgileriyle)
+        productionRecords.push({
+          id: mold ? `WO-${wo.id}-PRODUCT-${product.id}-MOLD-${mold.id}` : `WO-${wo.id}-PRODUCT-${product.id}`,
           machineId: machine.id.toString(),
           operatorId: user.id,
           operatorName: user.name,
-          productName: wo.product_code || wo.lot_no,
+          productName: product.name || wo.product_code,
           startTime: new Date(startTime),
-          partCount: producedCount,
-          targetCount: wo.qty,
-          cycleTime: cycleTime,
+          partCount: wo.produced_qty || 0,  // Database'den gelen mevcut üretilen ürün sayısı
+          targetCount: wo.qty,  // Database'den gelen hedef ürün sayısı
+          cycleTime: mold?.cycle_time_sec || 3,
           status: inProgressStage ? 'active' as const : 'paused' as const,
           stages: stages.map((s, idx) => ({
             id: `stage-${s.id}`,
@@ -220,10 +256,30 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             startTime: s.actual_start ? new Date(s.actual_start) : undefined,
             endTime: s.actual_end ? new Date(s.actual_end) : undefined,
           })),
-        };
-      });
+          // Mold bilgilerini ekle (database'den) - eğer varsa
+          moldData: mold ? {
+            id: mold.id,
+            name: mold.name,
+            code: mold.code,
+            cycle_time_sec: mold.cycle_time_sec,
+            hourly_production: mold.hourly_production,
+            injection_temp_c: mold.injection_temp_c,
+            mold_temp_c: mold.mold_temp_c,
+            material: mold.material,
+            part_weight_g: mold.part_weight_g,
+          } : undefined,
+          // Product bilgilerini de ekle
+          productData: {
+            id: product.id,
+            code: product.code,
+            name: product.name,
+          },
+        });
+      }
 
+      // Backend'den gelen verileri hem state'e hem de productionStore'a kaydet
       setActiveProductions(productionRecords);
+      productionStore.initialize(productionRecords);
     } catch (error: any) {
       console.error('Error loading backend data:', error);
       // Hata durumunda eski productionStore'dan veri göster
@@ -249,52 +305,50 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   // Her 1 saniyede bir yenile (aktif üretimler için - üretilen parça sayısını güncelle)
   useEffect(() => {
     const updateProductions = () => {
-      const active = productionStore.getActive();
-      
-      // Aktif üretimlerin partCount'unu otomatik güncelle
-      active.forEach(production => {
-        if (production.status === 'active' && production.cycleTime && production.cycleTime > 0) {
-          const now = new Date();
-          const startTime = new Date(production.startTime);
-          const elapsedSeconds = (now.getTime() - startTime.getTime()) / 1000;
-          let calculatedPartCount = Math.floor(elapsedSeconds / production.cycleTime);
-          
-          // Hedef sayı varsa ve hedef sayıya ulaşıldıysa
-          if (production.targetCount && calculatedPartCount >= production.targetCount) {
-            calculatedPartCount = production.targetCount;
+      // Mevcut state'i kullan (productionStore yerine)
+      setActiveProductions(prevProductions => {
+        const updated = prevProductions.map(production => {
+          if (production.status === 'active' && production.cycleTime && production.cycleTime > 0) {
+            const now = new Date();
+            const startTime = new Date(production.startTime);
+            const elapsedSeconds = (now.getTime() - startTime.getTime()) / 1000;
+            let calculatedPartCount = Math.floor(elapsedSeconds / production.cycleTime);
             
-            // Üretimi tamamlanmış olarak işaretle
-            productionStore.update(production.id, {
-              status: 'completed',
-              partCount: production.targetCount,
-              endTime: now,
-            });
-          } else {
-            // Sadece değiştiyse güncelle
-            if (calculatedPartCount !== production.partCount) {
-              productionStore.update(production.id, {
-                partCount: calculatedPartCount
-              });
+            // Hedef sayı varsa ve hedef sayıya ulaşıldıysa
+            if (production.targetCount && calculatedPartCount >= production.targetCount) {
+              calculatedPartCount = production.targetCount;
+              
+              // Üretimi tamamlanmış olarak işaretle
+              return {
+                ...production,
+                status: 'completed' as const,
+                partCount: production.targetCount,
+                endTime: now,
+              };
+            } else {
+              // Sadece değiştiyse güncelle
+              if (calculatedPartCount !== production.partCount) {
+                return {
+                  ...production,
+                  partCount: calculatedPartCount
+                };
+              }
             }
           }
-        }
+          return production;
+        });
+        
+        // Store'u da güncelle (senkronizasyon için)
+        productionStore.initialize(updated);
+        
+        return updated;
       });
-      
-      const updated = productionStore.getActive();
-      setActiveProductions([...updated]);
-      setRefreshKey(prev => prev + 1);
     };
 
     updateProductions();
     const interval = setInterval(updateProductions, 1000);
     return () => clearInterval(interval);
-  }, []);
-
-  // refreshKey değiştiğinde de güncelle
-  useEffect(() => {
-    const active = productionStore.getActive();
-    setActiveProductions([...active]);
-  }, [refreshKey]);
+  }, []); // activeProductions dependency olarak eklenmemeli (sonsuz loop olur)
 
   const getRoleDisplayName = (role: string) => {
     switch (role) {
@@ -502,40 +556,28 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         ) : (
           activeProductions.map((production: ProductionRecord) => {
             const machine = backendMachines.find(m => m.id.toString() === production.machineId);
-            const calculatedPartCount = calculatePartCount(production);
-            const cycleTime = getCycleTime(production);
-            const machineReadings = machineReadingsMap.get(machine?.id || 0) || [];
+            // Database'den gelen mevcut üretilen ürün sayısını kullan (production.partCount)
+            const calculatedPartCount = production.partCount || 0;
             
-            // Makine okumalarından bilgileri al
-            const injectionTempReading = machineReadings.find(r => 
-              r.reading_type.toLowerCase().includes('injection') || 
-              r.reading_type.toLowerCase().includes('temp') && !r.reading_type.toLowerCase().includes('mold')
-            );
-            const moldTempReading = machineReadings.find(r => 
-              r.reading_type.toLowerCase().includes('mold') || 
-              r.reading_type.toLowerCase() === 'mold_temp'
-            );
-            const materialReading = machineReadings.find(r => 
-              r.reading_type.toLowerCase().includes('material') || 
-              r.reading_type.toLowerCase() === 'material_type'
-            );
-            const weightReading = machineReadings.find(r => 
-              r.reading_type.toLowerCase().includes('weight') || 
-              r.reading_type.toLowerCase() === 'weight'
-            );
+            // Mold verilerini kullan (database'den)
+            const moldData = production.moldData;
             
-            // Varsayılan değerler (backend'de yoksa)
-            const injectionTemp = injectionTempReading?.value || '220';
-            const moldTemp = moldTempReading?.value || '45';
-            const material = materialReading?.value || 'ABS';
-            const weight = weightReading?.value || '35g';
+            // Mold verilerinden bilgileri al
+            const moldName = moldData?.name || 'N/A'; // KP-01 -> molds.name
+            const productName = production.productName; // priz -> products.name (zaten production.productName'de)
+            const cycleTime = moldData?.cycle_time_sec || production.cycleTime; // molds.cycle_time_sec
+            const hourlyOutput = moldData?.hourly_production; // molds.hourly_production
+            const injectionTemp = moldData?.injection_temp_c; // molds.injection_temp_c
+            const moldTemp = moldData?.mold_temp_c; // molds.mold_temp_c
+            const material = moldData?.material; // molds.material
+            const partWeight = moldData?.part_weight_g; // molds.part_weight_g
             
-            // Saatlik çıktı hesapla (cycle time'dan)
-            const hourlyOutput = cycleTime && cycleTime > 0 ? Math.floor(3600 / cycleTime) : 0;
-            
-            // Makine kodu (KP-01 formatında) - makine adından veya ID'den
+            // Makine kodu (KP-01 formatında) - mold name'den veya makine ID'den
             let machineCode = '';
-            if (machine?.name) {
+            if (moldName && moldName.match(/\d+/)) {
+              const numbers = moldName.match(/\d+/);
+              machineCode = numbers ? numbers[0] : '1';
+            } else if (machine?.name) {
               const numbers = machine.name.match(/\d+/);
               machineCode = numbers ? numbers[0] : machine.id.toString();
             } else {
@@ -555,7 +597,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <View style={styles.machineCardHeader}>
                   <View>
                     <Text style={styles.machineCardName}>{machineDisplayName}</Text>
-                    <Text style={styles.machineCardCode}>{machineDisplayCode}</Text>
+                    <Text style={styles.machineCardCode}>{moldName}</Text>
                   </View>
                   <View style={[styles.machineStatusDot, { backgroundColor: statusColor }]}>
                     <Text style={styles.machineStatusText}>{statusText}</Text>
@@ -563,19 +605,31 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 </View>
                 
                 {/* Ürün Adı */}
-                <Text style={styles.machineProductName}>{production.productName}</Text>
+                <Text style={styles.machineProductName}>{productName}</Text>
                 
-                {/* Cycle Time ve Hourly Output */}
+                {/* Metrikler - 4 ayrı kutucuk */}
                 <View style={styles.machineMetricsRow}>
                   <View style={styles.metricBox}>
                     <Text style={styles.metricIcon}>⏱</Text>
                     <Text style={styles.metricLabel}>Cycle Time</Text>
-                    <Text style={styles.metricValue}>{cycleTime || 0} sec</Text>
+                    <Text style={styles.metricValue}>{cycleTime} sec</Text>
                   </View>
+                  <View style={styles.metricBox}>
+                    <Text style={styles.metricIcon}>📊</Text>
+                    <Text style={styles.metricLabel}>Mevcut Üretim</Text>
+                    <Text style={styles.metricValue}>{calculatedPartCount} adet</Text>
+                  </View>
+                </View>
+                <View style={styles.machineMetricsRow}>
                   <View style={styles.metricBox}>
                     <Text style={styles.metricIcon}>📦</Text>
                     <Text style={styles.metricLabel}>Hourly Output</Text>
                     <Text style={styles.metricValue}>{hourlyOutput} pcs</Text>
+                  </View>
+                  <View style={styles.metricBox}>
+                    <Text style={styles.metricIcon}>🎯</Text>
+                    <Text style={styles.metricLabel}>Hedef Üretim</Text>
+                    <Text style={styles.metricValue}>{production.targetCount || 0} adet</Text>
                   </View>
                 </View>
                 
@@ -584,7 +638,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <Text style={styles.machineDetail}>Inj: {injectionTemp}°C</Text>
                   <Text style={styles.machineDetail}>Mold: {moldTemp}°C</Text>
                   <Text style={styles.machineDetail}>{material}</Text>
-                  <Text style={styles.machineDetail}>{weight}</Text>
+                  <Text style={styles.machineDetail}>{partWeight}g</Text>
                 </View>
               </View>
             );
@@ -594,28 +648,47 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Makine Durumu */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Makine Durumu</Text>
-          {machines.length === 0 ? (
+          {backendMachines.length === 0 ? (
             <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>
           ) : (
-            machines.map((machine) => (
-            <View key={machine.id} style={styles.machineItem}>
-              <View style={styles.machineHeader}>
-                <Text style={styles.machineName}>{machine.name}</Text>
-                <View style={[
-                  styles.statusBadge,
-                  machine.status === 'running' ? styles.runningBadge :
-                  machine.status === 'maintenance' ? styles.maintenanceBadge :
-                  styles.stoppedBadge
-                ]}>
-                  <Text style={styles.statusBadgeText}>
-                    {machine.status === 'running' ? 'Çalışıyor' :
-                     machine.status === 'maintenance' ? 'Bakım' :
-                     'Durdu'}
-                  </Text>
+            backendMachines.map((machine) => {
+              // Backend status değerlerini Türkçe'ye çevir
+              const getStatusText = (status: string) => {
+                if (status === 'active') return 'Çalışıyor';
+                if (status === 'maintenance') return 'Bakımda';
+                if (status === 'inactive') return 'Çalışmıyor';
+                return status; // Fallback
+              };
+
+              const getStatusColor = (status: string) => {
+                if (status === 'active') return '#27ae60'; // Yeşil - Çalışıyor
+                if (status === 'maintenance') return '#f39c12'; // Turuncu - Bakımda
+                if (status === 'inactive') return '#e74c3c'; // Kırmızı - Çalışmıyor
+                return '#95a5a6'; // Gri - Bilinmeyen
+              };
+
+              return (
+                <View key={machine.id} style={styles.machineItem}>
+                  <View style={styles.machineHeader}>
+                    <Text style={styles.machineName}>{machine.name}</Text>
+                    <View style={[
+                      styles.statusBadge,
+                      { backgroundColor: getStatusColor(machine.status) }
+                    ]}>
+                      <Text style={styles.statusBadgeText}>
+                        {getStatusText(machine.status)}
+                      </Text>
+                    </View>
+                  </View>
+                  {machine.machine_type && (
+                    <Text style={styles.machineDetail}>Tip: {machine.machine_type}</Text>
+                  )}
+                  {machine.location && (
+                    <Text style={styles.machineDetail}>Konum: {machine.location}</Text>
+                  )}
                 </View>
-              </View>
-            </View>
-            ))
+              );
+            })
           )}
         </View>
 
@@ -1164,6 +1237,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#2c3e50',
+  },
+  metricSubValue: {
+    fontSize: 12,
+    color: '#3498db',
+    marginTop: 4,
+    fontWeight: '600',
   },
   machineDetailsRow: {
     flexDirection: 'row',

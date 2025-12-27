@@ -241,6 +241,25 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------
+# ✅ Get Current User Info
+# ---------------------------------------------------------
+@router.get("/me", response_model=UserResponse)
+def get_current_user_info(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Mevcut kullanıcının bilgilerini döndürür.
+    
+    **Yetki:** Tüm giriş yapmış kullanıcılar
+    """
+    user = db.query(User).filter(User.id == current_user["user_id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı.")
+    return user
+
+
+# ---------------------------------------------------------
 # ✅ Admin: List Users
 # ---------------------------------------------------------
 @router.get("/users", response_model=List[UserResponse])

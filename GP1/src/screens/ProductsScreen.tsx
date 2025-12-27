@@ -14,7 +14,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { User } from '../types';
-import { productsAPI } from '../utils/api';
+import { productsAPI, moldsAPI, workOrdersAPI } from '../utils/api';
 
 interface ProductsScreenProps {
   user: User;
@@ -31,16 +31,70 @@ interface Product {
   deleted_at: string | null;
 }
 
+interface Mold {
+  id: number;
+  code: string;
+  name: string;
+  product_id?: number;
+  cycle_time_sec?: number;
+  hourly_production?: number;
+  injection_temp_c?: number;
+  mold_temp_c?: number;
+  material?: string;
+  part_weight_g?: number;
+}
+
+interface WorkOrder {
+  id: number;
+  product_code: string;
+  produced_qty: number;
+}
+
+interface ProductWithDetails extends Product {
+  mold?: Mold;
+  producedQty: number;
+}
+
 const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<ProductWithDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [expandedProducts, setExpandedProducts] = useState<Set<number>>(new Set());
 
   const loadProducts = async () => {
     try {
       setLoading(true);
-      const data = await productsAPI.getProducts();
-      setProducts(Array.isArray(data) ? data : []);
+      
+      // Products yükle
+      const productsData = await productsAPI.getProducts();
+      const allProducts: Product[] = Array.isArray(productsData) ? productsData : [];
+      
+      // Molds yükle
+      const moldsData = await moldsAPI.getMolds();
+      const allMolds: Mold[] = Array.isArray(moldsData) ? moldsData : [];
+      
+      // Work orders yükle (mevcut ürün sayısı için)
+      const woResponse = await workOrdersAPI.getWorkOrders();
+      const woData = woResponse.data || woResponse;
+      const allWorkOrders: WorkOrder[] = Array.isArray(woData) ? woData : [];
+      
+      // Her ürün için mold ve produced_qty bilgilerini ekle
+      const productsWithDetails: ProductWithDetails[] = allProducts.map(product => {
+        // Bu ürüne ait mold'u bul
+        const mold = allMolds.find(m => m.product_id === product.id);
+        
+        // Bu ürün için work order'ları bul ve toplam produced_qty hesapla
+        const productWorkOrders = allWorkOrders.filter(wo => wo.product_code === product.code);
+        const totalProducedQty = productWorkOrders.reduce((sum, wo) => sum + (wo.produced_qty || 0), 0);
+        
+        return {
+          ...product,
+          mold: mold,
+          producedQty: totalProducedQty,
+        };
+      });
+      
+      setProducts(productsWithDetails);
     } catch (error: any) {
       console.error('Error loading products:', error);
     } finally {
@@ -56,6 +110,18 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
     setRefreshing(true);
     await loadProducts();
     setRefreshing(false);
+  };
+
+  const toggleProduct = (productId: number) => {
+    setExpandedProducts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(productId)) {
+        newSet.delete(productId);
+      } else {
+        newSet.add(productId);
+      }
+      return newSet;
+    });
   };
 
   const formatDate = (dateString: string | null) => {
@@ -101,30 +167,83 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
             <Text style={styles.emptyText}>Ürün bulunmamaktadır.</Text>
           </View>
         ) : (
-          products.map((product) => (
-            <View key={product.id} style={styles.productCard}>
-              <View style={styles.productHeader}>
-                <Text style={styles.productCode}>{product.code}</Text>
-                <View style={styles.statusBadge}>
-                  <Text style={styles.statusText}>Aktif</Text>
-                </View>
-              </View>
-              <Text style={styles.productName}>{product.name}</Text>
-              {product.description && (
-                <Text style={styles.productDescription}>{product.description}</Text>
-              )}
-              <View style={styles.productFooter}>
-                <Text style={styles.productDate}>
-                  Oluşturulma: {formatDate(product.created_at)}
-                </Text>
-                {product.updated_at && (
-                  <Text style={styles.productDate}>
-                    Güncelleme: {formatDate(product.updated_at)}
-                  </Text>
+          products.map((product) => {
+            const mold = product.mold;
+            const cycleTime = mold?.cycle_time_sec || 0;
+            const hourlyOutput = mold?.hourly_production || 0;
+            const injectionTemp = mold?.injection_temp_c || 0;
+            const moldTemp = mold?.mold_temp_c || 0;
+            const material = mold?.material || '-';
+            const partWeight = mold?.part_weight_g || 0;
+            const moldName = mold?.name || '-';
+            const isExpanded = expandedProducts.has(product.id);
+            
+            return (
+              <View key={product.id} style={styles.productCard}>
+                {/* Tıklanabilir Header - Sadece Ürün Adı */}
+                <TouchableOpacity 
+                  style={styles.productHeaderButton}
+                  onPress={() => toggleProduct(product.id)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.productHeader}>
+                    <Text style={styles.productNameCollapsed}>{product.name}</Text>
+                    <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
+                  </View>
+                </TouchableOpacity>
+                
+                {/* Detaylar - Sadece açıkken göster */}
+                {isExpanded && (
+                  <View style={styles.productDetails}>
+                    {/* Header */}
+                    <View style={styles.detailHeader}>
+                      <View>
+                        <Text style={styles.productCode}>{product.code}</Text>
+                        <Text style={styles.moldCode}>{moldName}</Text>
+                      </View>
+                      <View style={styles.statusBadge}>
+                        <Text style={styles.statusText}>Aktif</Text>
+                      </View>
+                    </View>
+                    
+                    {/* Metrikler - 4 ayrı kutucuk */}
+                    <View style={styles.metricsRow}>
+                      <View style={styles.metricBox}>
+                        <Text style={styles.metricIcon}>⏱</Text>
+                        <Text style={styles.metricLabel}>Cycle Time</Text>
+                        <Text style={styles.metricValue}>{cycleTime} sec</Text>
+                      </View>
+                      <View style={styles.metricBox}>
+                        <Text style={styles.metricIcon}>📊</Text>
+                        <Text style={styles.metricLabel}>Mevcut Üretim</Text>
+                        <Text style={styles.metricValue}>{product.producedQty} adet</Text>
+                      </View>
+                    </View>
+                    <View style={styles.metricsRow}>
+                      <View style={styles.metricBox}>
+                        <Text style={styles.metricIcon}>📦</Text>
+                        <Text style={styles.metricLabel}>Hourly Output</Text>
+                        <Text style={styles.metricValue}>{hourlyOutput} pcs</Text>
+                      </View>
+                      <View style={styles.metricBox}>
+                        <Text style={styles.metricIcon}>🏭</Text>
+                        <Text style={styles.metricLabel}>Kalıp</Text>
+                        <Text style={styles.metricValue}>{moldName}</Text>
+                      </View>
+                    </View>
+                    
+                    {/* Alt Bilgiler */}
+                    <View style={styles.detailsRow}>
+                      <Text style={styles.detailText}>Inj: {injectionTemp}°C</Text>
+                      <Text style={styles.detailText}>Mold: {moldTemp}°C</Text>
+                      <Text style={styles.detailText}>{material}</Text>
+                      <Text style={styles.detailText}>{partWeight}g</Text>
+                    </View>
+                  </View>
                 )}
               </View>
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -180,30 +299,64 @@ const styles = StyleSheet.create({
   productCard: {
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 20,
     marginBottom: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    overflow: 'hidden',
+  },
+  productHeaderButton: {
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
   },
   productHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
   },
-  productCode: {
+  productNameCollapsed: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#3498db',
+    color: '#2c3e50',
+    flex: 1,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginLeft: 10,
+  },
+  productDetails: {
+    padding: 20,
+    paddingTop: 15,
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 15,
+  },
+  productCode: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7f8c8d',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  moldCode: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
   },
   statusBadge: {
     backgroundColor: '#27ae60',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
   },
   statusText: {
     color: 'white',
@@ -211,27 +364,50 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   productName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#2c3e50',
-    marginBottom: 8,
+    marginBottom: 15,
   },
-  productDescription: {
-    fontSize: 14,
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    gap: 10,
+  },
+  metricBox: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  metricIcon: {
+    fontSize: 20,
+    marginBottom: 5,
+  },
+  metricLabel: {
+    fontSize: 11,
     color: '#7f8c8d',
-    marginBottom: 10,
-    lineHeight: 20,
+    marginBottom: 4,
+    fontWeight: '600',
   },
-  productFooter: {
-    marginTop: 10,
-    paddingTop: 10,
+  metricValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#ecf0f1',
   },
-  productDate: {
+  detailText: {
     fontSize: 12,
-    color: '#95a5a6',
-    marginTop: 4,
+    color: '#7f8c8d',
+    fontWeight: '500',
   },
   emptyCard: {
     backgroundColor: 'white',

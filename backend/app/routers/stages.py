@@ -25,7 +25,7 @@ def start_stage(
     
     **Yetki:** "worker" veya "planner" rolü
     """
-    s = db.query(WorkOrderStage).get(wos_id)
+    s = db.query(WorkOrderStage).filter(WorkOrderStage.id == wos_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Stage not found")
 
@@ -69,7 +69,7 @@ def done_stage(
     
     **Yetki:** "worker" veya "planner" rolü
     """
-    s = db.query(WorkOrderStage).get(wos_id)
+    s = db.query(WorkOrderStage).filter(WorkOrderStage.id == wos_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Stage not found")
 
@@ -117,7 +117,7 @@ def report_issue(
     
     **Yetki:** "worker" veya "planner" rolü
     """
-    s = db.query(WorkOrderStage).get(wos_id)
+    s = db.query(WorkOrderStage).filter(WorkOrderStage.id == wos_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Stage not found")
 

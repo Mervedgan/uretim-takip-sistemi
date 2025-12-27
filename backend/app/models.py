@@ -21,7 +21,8 @@ class WorkOrder(Base):
     id = Column(Integer, primary_key=True)
     product_code = Column(String)
     lot_no = Column(String)
-    qty = Column(Integer)
+    qty = Column(Integer)  # Hedef ürün sayısı
+    produced_qty = Column(Integer, default=0)  # Mevcut üretilen ürün sayısı
     planned_start = Column(DateTime, nullable=True)
     planned_end = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # Work order'ı oluşturan kullanıcı
