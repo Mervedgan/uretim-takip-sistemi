@@ -150,3 +150,97 @@ def report_issue(
         "notifications_sent": 2  # admin + planner
     }
 
+
+# ---------------------------------------------------------
+# ✅ Stage Durdur (Pause): Worker veya Planner
+# ---------------------------------------------------------
+@router.post("/{wos_id}/pause", response_model=StartDoneResponse)
+def pause_stage(
+    wos_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_roles("worker", "planner"))  # ✅ worker + planner
+):
+    """
+    Bir aşamayı durdurur (in_progress -> paused).
+    
+    **Yetki:** "worker" veya "planner" rolü
+    """
+    s = db.query(WorkOrderStage).filter(WorkOrderStage.id == wos_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Stage not found")
+
+    if s.actual_start is None:
+        raise HTTPException(status_code=400, detail="Stage not started yet")
+
+    # ✅ State machine validation
+    if s.status != "in_progress":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot pause stage. Current status: {s.status}. Expected: 'in_progress'"
+        )
+
+    try:
+        validate_state_transition(s.status, "paused")
+        s.paused_at = datetime.now(timezone.utc)
+        s.status = "paused"
+        db.commit()
+        db.refresh(s)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "ok": True,
+        "work_order_stage_id": s.id,
+        "status": s.status,
+        "actual_start": s.actual_start,
+        "actual_end": s.actual_end,
+        "paused_at": s.paused_at,
+    }
+
+
+# ---------------------------------------------------------
+# ✅ Stage Devam Et (Resume): Worker veya Planner
+# ---------------------------------------------------------
+@router.post("/{wos_id}/resume", response_model=StartDoneResponse)
+def resume_stage(
+    wos_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_roles("worker", "planner"))  # ✅ worker + planner
+):
+    """
+    Bir aşamayı devam ettirir (paused -> in_progress).
+    
+    **Yetki:** "worker" veya "planner" rolü
+    """
+    s = db.query(WorkOrderStage).filter(WorkOrderStage.id == wos_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Stage not found")
+
+    if s.actual_start is None:
+        raise HTTPException(status_code=400, detail="Stage not started yet")
+
+    # ✅ State machine validation
+    if s.status != "paused":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot resume stage. Current status: {s.status}. Expected: 'paused'"
+        )
+
+    try:
+        validate_state_transition(s.status, "in_progress")
+        s.resumed_at = datetime.now(timezone.utc)
+        s.status = "in_progress"
+        db.commit()
+        db.refresh(s)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "ok": True,
+        "work_order_stage_id": s.id,
+        "status": s.status,
+        "actual_start": s.actual_start,
+        "actual_end": s.actual_end,
+        "paused_at": s.paused_at,
+        "resumed_at": s.resumed_at,
+    }

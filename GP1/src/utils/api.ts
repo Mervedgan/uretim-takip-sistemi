@@ -329,6 +329,7 @@ export const workOrdersAPI = {
     qty: number;
     planned_start: string;
     planned_end: string;
+    stage_count?: number;
   }) {
     try {
       const response = await apiClient.post('/workorders', data);
@@ -437,6 +438,44 @@ export const stagesAPI = {
     } catch (error: any) {
       console.error('Error reporting issue:', error);
       throw new Error(error.response?.data?.detail || error.message || 'Sorun bildirilemedi');
+    }
+  },
+
+  async pauseStage(stageId: number) {
+    try {
+      if (!stageId || typeof stageId !== 'number') {
+        throw new Error(`Geçersiz stage ID: ${stageId}`);
+      }
+      const response = await apiClient.post(`/stages/${stageId}/pause`);
+      return response.data;
+    } catch (error: any) {
+      const errorDetail = error.response?.data?.detail || error.message || 'Aşama durdurulamadı';
+      console.error('Error pausing stage:', {
+        stageId,
+        status: error.response?.status,
+        detail: errorDetail,
+        fullError: error
+      });
+      throw new Error(errorDetail);
+    }
+  },
+
+  async resumeStage(stageId: number) {
+    try {
+      if (!stageId || typeof stageId !== 'number') {
+        throw new Error(`Geçersiz stage ID: ${stageId}`);
+      }
+      const response = await apiClient.post(`/stages/${stageId}/resume`);
+      return response.data;
+    } catch (error: any) {
+      const errorDetail = error.response?.data?.detail || error.message || 'Aşama devam ettirilemedi';
+      console.error('Error resuming stage:', {
+        stageId,
+        status: error.response?.status,
+        detail: errorDetail,
+        fullError: error
+      });
+      throw new Error(errorDetail);
     }
   },
 };

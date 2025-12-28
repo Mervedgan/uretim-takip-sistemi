@@ -38,7 +38,9 @@ class WorkOrderStage(Base):
     planned_end = Column(DateTime, nullable=True)
     actual_start = Column(DateTime, nullable=True)
     actual_end = Column(DateTime, nullable=True)
-    status = Column(String, default="planned")  # planned / in_progress / done
+    status = Column(String, default="planned")  # planned / in_progress / paused / done
+    paused_at = Column(DateTime, nullable=True)  # Durdurulma zamanı
+    resumed_at = Column(DateTime, nullable=True)  # Devam ettirilme zamanı
 
 
 # ⚠️ Arıza Bildirimleri tablosu

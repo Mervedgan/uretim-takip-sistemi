@@ -38,45 +38,110 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
 # Alembic
 alembic/versions/*.pyc
+alembic/versions/__pycache__/
 
 # Test
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+.hypothesis/
 
 # Temporary files
 *.tmp
 *.bak
 *.swp
+*.swo
 
 # PowerShell
 *.ps1.bak
 
 # Docker
 docker-compose.override.yml
+.dockerignore
 
-# Backend - Virtual Environment (tüm .venv içeriği)
+# Backend - Virtual Environment
 backend/.venv/
+backend/venv/
+backend/env/
 
 # Backend - Python cache files
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/**/*.pyo
+backend/**/*.pyd
+
+# Backend - Logs
+backend/logs/
+backend/*.log
+
+# Backend - Database files
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+
+# GP1 - Node modules
+GP1/node_modules/
+GP1/.npm/
+GP1/.yarn/
+GP1/.yarn/cache/
+GP1/.yarn/unplugged/
+GP1/.yarn/build-state.yml
+GP1/.yarn/install-state.gz
+GP1/.pnp.*
 
 # GP1 - Expo ve React Native
-GP1/node_modules/
 GP1/.expo/
 GP1/.expo-shared/
 GP1/dist/
 GP1/web-build/
+GP1/.metro/
+GP1/.watchmanconfig
+
+# GP1 - Android
 GP1/android/app/build/
 GP1/android/build/
+GP1/android/.gradle/
+GP1/android/local.properties
+GP1/android/app/debug.keystore
+GP1/android/app/release.keystore
+GP1/android/.idea/
+GP1/android/*.iml
+GP1/android/.externalNativeBuild/
+GP1/android/.cxx/
+GP1/android/app/release/
+
+# GP1 - iOS
 GP1/ios/Pods/
 GP1/ios/build/
+GP1/ios/DerivedData/
+GP1/ios/*.xcworkspace/xcuserdata/
+GP1/ios/*.xcodeproj/xcuserdata/
+GP1/ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+GP1/ios/.xcode.env.local
+
+# GP1 - TypeScript
+GP1/*.tsbuildinfo
+GP1/.tsbuildinfo
+
+# GP1 - Testing
+GP1/coverage/
+GP1/.nyc_output/
+
+# GP1 - Misc
+GP1/.DS_Store
+GP1/.env.local
+GP1/.env.development.local
+GP1/.env.test.local
+GP1/.env.production.local
+
+# Root level
 *.log
-
-
-
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

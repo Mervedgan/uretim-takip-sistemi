@@ -3,7 +3,7 @@
  * Tüm kullanıcılar için genel ana ekran
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { User, ProductionRecord, Machine } from '../types';
 import { productionStore } from '../data/productionStore';
-import { workOrdersAPI, machinesAPI, stagesAPI, productsAPI, moldsAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, stagesAPI, productsAPI, moldsAPI, issuesAPI } from '../utils/api';
 
 interface DashboardScreenProps {
   user: User;
@@ -48,7 +48,9 @@ interface WorkOrderStage {
   planned_end: string | null;
   actual_start: string | null;
   actual_end: string | null;
-  status: 'planned' | 'in_progress' | 'done';
+  status: 'planned' | 'in_progress' | 'paused' | 'done';
+  paused_at?: string | null;
+  resumed_at?: string | null;
 }
 
 interface BackendMachine {
@@ -95,13 +97,21 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onLogout, 
   onNavigateToRoleScreen,
   onNavigateToProducts,
-  onNavigateToMolds 
+  onNavigateToMolds,
+  refreshTrigger
 }) => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeProductions, setActiveProductions] = useState<ProductionRecord[]>([]);
+  // useRef ile activeProductions'ın güncel değerini takip et (closure sorununu önlemek için)
+  const activeProductionsRef = useRef<ProductionRecord[]>([]);
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [selectedProductionId, setSelectedProductionId] = useState<string | null>(null);
   const [issueDescription, setIssueDescription] = useState('');
+  
+  // activeProductions değiştiğinde ref'i güncelle
+  useEffect(() => {
+    activeProductionsRef.current = activeProductions;
+  }, [activeProductions]);
   
   // Backend verileri
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
@@ -143,6 +153,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
       const machinesResponse = await machinesAPI.getMachines();
       const machinesData = machinesResponse.data || machinesResponse;
       const allMachines = Array.isArray(machinesData) ? machinesData : [];
+      // Makine listesini ID'ye göre sırala (deterministik makine seçimi için)
+      allMachines.sort((a, b) => a.id - b.id);
       setBackendMachines(allMachines);
 
       // Products yükle
@@ -187,11 +199,21 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
       }
       setMachineReadingsMap(readingsMap);
 
+      // Tüm issue'ları yükle (paused stage'ler için)
+      let allIssues: any[] = [];
+      try {
+        const issuesResponse = await issuesAPI.listIssues();
+        const issuesData = issuesResponse.data || issuesResponse;
+        allIssues = Array.isArray(issuesData) ? issuesData : [];
+      } catch (error) {
+        console.error('Error loading issues:', error);
+      }
+
       // Aktif work orders'ları ProductionRecord formatına dönüştür
       const activeWOs = allWorkOrders.filter(wo => {
         const stages = stagesMap.get(wo.id) || [];
-        // En az bir stage in_progress veya done ise aktif
-        return stages.some(s => s.status === 'in_progress' || s.status === 'done');
+        // En az bir stage in_progress, paused veya done ise aktif
+        return stages.some(s => s.status === 'in_progress' || s.status === 'paused' || s.status === 'done');
       });
 
       // Benzersiz product'ları bul (product_code'a göre)
@@ -207,15 +229,18 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         uniqueProducts.get(product.code)!.workOrders.push(wo);
       }
       
-      // İlk 4 ürünü seç (database'den - otomotiv klipsi dahil)
-      const selectedProducts = Array.from(uniqueProducts.values()).slice(0, 4);
+      // İlk 4 ürünü seç (deterministik sıralama - product code'a göre)
+      const selectedProducts = Array.from(uniqueProducts.values())
+        .sort((a, b) => a.product.code.localeCompare(b.product.code))
+        .slice(0, 4);
 
       // Product code'dan product'ı bul ve molds'ları al
       const productionRecords: ProductionRecord[] = [];
       
       for (const { product, workOrders: productWorkOrders } of selectedProducts) {
-        // Bu product için ilk aktif work order'ı al
-        const wo = productWorkOrders[0];
+        // Bu product için en son aktif work order'ı seç (ID'ye göre sırala - deterministik)
+        const sortedWorkOrders = [...productWorkOrders].sort((a, b) => b.id - a.id);
+        const wo = sortedWorkOrders[0];
         
         // Product'a ait ilk mold'u al (her ürün için 1 mold)
         const productMolds = productIdToMolds.get(product.id) || [];
@@ -224,34 +249,105 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         const stages = stagesMap.get(wo.id) || [];
         const firstStage = stages[0];
         const inProgressStage = stages.find(s => s.status === 'in_progress');
+        const pausedStage = stages.find(s => s.status === 'paused');
         const doneStages = stages.filter(s => s.status === 'done');
         
+        // Paused stage için issue bilgisini al
+        let issueDescription: string | undefined;
+        let pausedAtDate: Date | undefined;
+        if (pausedStage) {
+          // Bu stage için en son issue'u bul
+          const stageIssue = allIssues
+            .filter((issue: any) => issue.work_order_stage_id === pausedStage.id)
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+          if (stageIssue && stageIssue.description) {
+            issueDescription = stageIssue.description;
+            pausedAtDate = pausedStage.paused_at ? new Date(pausedStage.paused_at) : undefined;
+          }
+        }
+        
         const startTime = inProgressStage?.actual_start || 
+                         pausedStage?.actual_start ||
                          doneStages[0]?.actual_start || 
                          firstStage?.planned_start || 
                          wo.planned_start;
 
-        const machineIndex = wo.id % (allMachines.length || 1);
+        // Production ID'yi bir kez hesapla (deterministik makine seçimi için kullanılacak)
+        const productionId = mold ? `WO-${wo.id}-PRODUCT-${product.id}-MOLD-${mold.id}` : `WO-${wo.id}-PRODUCT-${product.id}`;
+        
+        // Deterministik makine seçimi: Production ID'ye göre (her zaman aynı production aynı makineye atanır)
+        const machineHash = productionId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const machineIndex = machineHash % (allMachines.length || 1);
         const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
+
+        // Mevcut production'ı bul (eğer varsa) - ref'ten al (güncel değer)
+        const existingProduction = activeProductionsRef.current.find(p => p.id === productionId);
+        
+        // Status hesapla
+        const calculatedStatus = (() => {
+          if (inProgressStage) return 'active' as const;
+          if (pausedStage) return 'paused' as const;
+          // Tüm stage'ler done ise completed
+          if (doneStages.length === stages.length && stages.length > 0) return 'completed' as const;
+          // Hiç stage yoksa veya sadece planned stage'ler varsa paused
+          return 'paused' as const;
+        })();
+
+        // Eğer mevcut production varsa ve kritik alanlar değişmediyse, mevcut production'ı kullan
+        if (existingProduction) {
+          const statusChanged = existingProduction.status !== calculatedStatus;
+          const targetCountChanged = existingProduction.targetCount !== wo.qty;
+          const cycleTimeChanged = existingProduction.cycleTime !== (mold?.cycle_time_sec || 3);
+          const productNameChanged = existingProduction.productName !== (product.name || wo.product_code);
+          
+          // Kritik alanlar değişmediyse, mevcut production'ı kullan (aynı referans)
+          // Bu sayede React gereksiz render yapmayacak
+          if (!statusChanged && !targetCountChanged && !cycleTimeChanged && !productNameChanged) {
+            productionRecords.push(existingProduction);
+            continue; // Bir sonraki product'a geç
+          }
+        }
 
         // Her ürün için 1 production record oluştur (mold varsa mold bilgileriyle, yoksa sadece product bilgileriyle)
         productionRecords.push({
-          id: mold ? `WO-${wo.id}-PRODUCT-${product.id}-MOLD-${mold.id}` : `WO-${wo.id}-PRODUCT-${product.id}`,
+          id: productionId,
           machineId: machine.id.toString(),
           operatorId: user.id,
           operatorName: user.name,
           productName: product.name || wo.product_code,
-          startTime: new Date(startTime),
-          partCount: wo.produced_qty || 0,  // Database'den gelen mevcut üretilen ürün sayısı
+          startTime: existingProduction?.startTime || new Date(startTime), // Mevcut startTime'ı koru
+          partCount: (() => {
+            // Eğer mevcut production varsa partCount'u koru
+            if (existingProduction) {
+              // Aktif production için client-side hesaplanan değeri koru
+              if (existingProduction.status === 'active' && 
+                  existingProduction.cycleTime && 
+                  existingProduction.cycleTime > 0) {
+                return existingProduction.partCount;
+              }
+              // Paused veya completed production için mevcut partCount'u koru
+              if (existingProduction.status === 'paused' || existingProduction.status === 'completed') {
+                return existingProduction.partCount;
+              }
+            }
+            return wo.produced_qty || 0;
+          })(),
           targetCount: wo.qty,  // Database'den gelen hedef ürün sayısı
           cycleTime: mold?.cycle_time_sec || 3,
-          status: inProgressStage ? 'active' as const : 'paused' as const,
+          status: (() => {
+            // Eğer mevcut production aktifse ve backend'den gelen status paused veya completed değilse, aktif kal
+            if (existingProduction?.status === 'active' && calculatedStatus === 'active') {
+              return existingProduction.status;
+            }
+            return calculatedStatus;
+          })(),
           stages: stages.map((s, idx) => ({
             id: `stage-${s.id}`,
             name: s.stage_name,
             order: idx + 1,
             status: s.status === 'done' ? 'completed' as const :
                    s.status === 'in_progress' ? 'in_progress' as const :
+                   s.status === 'paused' ? 'paused' as const :
                    'pending' as const,
             startTime: s.actual_start ? new Date(s.actual_start) : undefined,
             endTime: s.actual_end ? new Date(s.actual_end) : undefined,
@@ -274,12 +370,141 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             code: product.code,
             name: product.name,
           },
+          // Issue bilgilerini ekle (eğer paused stage varsa)
+          issue: issueDescription,
+          pausedAt: pausedAtDate,
         });
       }
+      
+      // Production records'ları ID'ye göre sırala (deterministik sıralama)
+      productionRecords.sort((a, b) => a.id.localeCompare(b.id));
 
       // Backend'den gelen verileri hem state'e hem de productionStore'a kaydet
-      setActiveProductions(productionRecords);
-      productionStore.initialize(productionRecords);
+      // Sadece gerçekten değişiklik varsa state'i güncelle (gereksiz render'ları önlemek için)
+      setActiveProductions(prevProductions => {
+        // Production ID'lerini karşılaştır (sıralı)
+        const prevIds = prevProductions.map(p => p.id).sort().join(',');
+        const newIds = productionRecords.map(p => p.id).sort().join(',');
+        
+        // Debug: Production ID'lerini logla
+        if (prevIds !== newIds) {
+          console.log('🔄 Production listesi değişti:', { prevIds, newIds });
+        }
+        
+        // Eğer production listesi değişmediyse, sadece backend'den gelen kritik alanları güncelle
+        // Ama partCount gibi client-side hesaplanan değerleri koru
+        if (prevIds === newIds && prevProductions.length > 0) {
+          // Production listesi aynı, sadece backend'den gelen değerleri güncelle
+          // Ama mevcut production'ların referanslarını mümkün olduğunca koru
+          let hasRealChanges = false;
+          const updated = prevProductions.map((prevProd, index) => {
+            // Production records zaten sıralı, aynı index'teki production'ı al
+            const newProd = productionRecords[index];
+            
+            // Eğer ID'ler eşleşmiyorsa, find ile bul
+            if (!newProd || newProd.id !== prevProd.id) {
+              const foundNewProd = productionRecords.find(p => p.id === prevProd.id);
+              if (!foundNewProd) return prevProd;
+              
+              // Kritik alanları karşılaştır
+              const shouldKeepPartCount = prevProd.status === 'active' && 
+                                        prevProd.cycleTime && 
+                                        prevProd.cycleTime > 0;
+              const shouldKeepStatus = prevProd.status === 'active';
+              
+              const partCountChanged = !shouldKeepPartCount && prevProd.partCount !== foundNewProd.partCount;
+              const statusChanged = !shouldKeepStatus && prevProd.status !== foundNewProd.status;
+              const targetCountChanged = prevProd.targetCount !== foundNewProd.targetCount;
+              const startTimeChanged = prevProd.startTime.getTime() !== foundNewProd.startTime.getTime();
+              
+              // Eğer hiçbir kritik alan değişmediyse, aynı referansı döndür
+              if (!partCountChanged && !statusChanged && !targetCountChanged && !startTimeChanged) {
+                return prevProd; // Aynı referans - React render yapmayacak
+              }
+              
+              hasRealChanges = true;
+              return {
+                ...foundNewProd,
+                partCount: shouldKeepPartCount ? prevProd.partCount : foundNewProd.partCount,
+                status: shouldKeepStatus ? prevProd.status : foundNewProd.status,
+                startTime: prevProd.startTime,
+              };
+            }
+            
+            // Aynı index'te, aynı ID - direkt karşılaştır
+            const shouldKeepPartCount = prevProd.status === 'active' && 
+                                      prevProd.cycleTime && 
+                                      prevProd.cycleTime > 0;
+            const shouldKeepStatus = prevProd.status === 'active';
+            
+            const partCountChanged = !shouldKeepPartCount && prevProd.partCount !== newProd.partCount;
+            const statusChanged = !shouldKeepStatus && prevProd.status !== newProd.status;
+            const targetCountChanged = prevProd.targetCount !== newProd.targetCount;
+            const startTimeChanged = prevProd.startTime.getTime() !== newProd.startTime.getTime();
+            
+            // Eğer hiçbir kritik alan değişmediyse, aynı referansı döndür
+            if (!partCountChanged && !statusChanged && !targetCountChanged && !startTimeChanged) {
+              return prevProd; // Aynı referans - React render yapmayacak
+            }
+            
+            hasRealChanges = true;
+            return {
+              ...newProd,
+              partCount: shouldKeepPartCount ? prevProd.partCount : newProd.partCount,
+              status: shouldKeepStatus ? prevProd.status : newProd.status,
+              startTime: prevProd.startTime,
+            };
+          });
+          
+          // Sadece gerçekten değişiklik varsa state'i güncelle
+          if (hasRealChanges) {
+            productionStore.initialize(updated);
+            return updated;
+          } else {
+            // Hiçbir değişiklik yok, aynı referansı döndür
+            return prevProductions;
+          }
+        } else {
+          // Production listesi değişti veya ilk yükleme - mevcut production'ları koruyarak güncelle
+          const updated = productionRecords.map(newProd => {
+            // Mevcut production'ı bul
+            const existingProd = prevProductions.find(p => p.id === newProd.id);
+            
+            if (existingProd) {
+              // Mevcut production varsa, mümkün olduğunca referansı koru
+              // Sadece gerçekten değişen alanları güncelle
+              const shouldKeepPartCount = existingProd.status === 'active' && 
+                                        existingProd.cycleTime && 
+                                        existingProd.cycleTime > 0;
+              const shouldKeepStatus = existingProd.status === 'active';
+              
+              const partCountChanged = !shouldKeepPartCount && existingProd.partCount !== newProd.partCount;
+              const statusChanged = !shouldKeepStatus && existingProd.status !== newProd.status;
+              const targetCountChanged = existingProd.targetCount !== newProd.targetCount;
+              const startTimeChanged = existingProd.startTime.getTime() !== newProd.startTime.getTime();
+              
+              // Eğer hiçbir kritik alan değişmediyse, mevcut production'ı koru
+              if (!partCountChanged && !statusChanged && !targetCountChanged && !startTimeChanged) {
+                return existingProd; // Aynı referans - React render yapmayacak
+              }
+              
+              // Kritik alanlar değiştiyse, sadece değişen alanları güncelle
+              return {
+                ...newProd,
+                partCount: shouldKeepPartCount ? existingProd.partCount : newProd.partCount,
+                status: shouldKeepStatus ? existingProd.status : newProd.status,
+                startTime: existingProd.startTime,
+              };
+            }
+            
+            // Yeni production - direkt ekle
+            return newProd;
+          });
+          
+          productionStore.initialize(updated);
+          return updated;
+        }
+      });
     } catch (error: any) {
       console.error('Error loading backend data:', error);
       // Hata durumunda eski productionStore'dan veri göster
@@ -296,17 +521,46 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   // Component mount olduğunda backend'den veri yükle
   useEffect(() => {
     loadBackendData();
-    
-    // Her 5 saniyede bir yenile
-    const interval = setInterval(loadBackendData, 5000);
-    return () => clearInterval(interval);
   }, []);
 
-  // Her 1 saniyede bir yenile (aktif üretimler için - üretilen parça sayısını güncelle)
+  // refreshTrigger değiştiğinde verileri yenile
   useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      // Veritabanı güncellemelerinin tamamlanması için bekleme
+      const timeoutId = setTimeout(() => {
+        loadBackendData();
+        // Stage'lerin güncellenmesi için bir kez daha refresh yap
+        setTimeout(() => {
+          loadBackendData();
+        }, 1500);
+        // Son bir kez daha refresh yap (tüm güncellemelerin tamamlanması için)
+        setTimeout(() => {
+          loadBackendData();
+        }, 3000);
+      }, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [refreshTrigger]);
+
+  // Her 1 saniyede bir yenile (aktif üretimler için - üretilen parça sayısını güncelle)
+  // Aynı zamanda her 5 saniyede bir backend'den veri çek (loadBackendData ile senkronize)
+  useEffect(() => {
+    let backendDataCounter = 0; // Backend data çağrısı için sayaç
+    
     const updateProductions = () => {
+      // Her 5 saniyede bir (5 çağrıda bir) backend'den veri çek
+      backendDataCounter++;
+      if (backendDataCounter >= 5) {
+        backendDataCounter = 0;
+        // Backend'den veri çek (asenkron - state güncellemesini engellemez)
+        loadBackendData().catch(err => {
+          console.error('Error loading backend data in updateProductions:', err);
+        });
+      }
+      
       // Mevcut state'i kullan (productionStore yerine)
       setActiveProductions(prevProductions => {
+        let hasChanges = false;
         const updated = prevProductions.map(production => {
           if (production.status === 'active' && production.cycleTime && production.cycleTime > 0) {
             const now = new Date();
@@ -318,7 +572,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             if (production.targetCount && calculatedPartCount >= production.targetCount) {
               calculatedPartCount = production.targetCount;
               
-              // Üretimi tamamlanmış olarak işaretle
+              // Üretimi tamamlanmış olarak işaretle (status zaten 'active' olduğu için her zaman değişecek)
+              hasChanges = true;
               return {
                 ...production,
                 status: 'completed' as const,
@@ -328,6 +583,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             } else {
               // Sadece değiştiyse güncelle
               if (calculatedPartCount !== production.partCount) {
+                hasChanges = true;
                 return {
                   ...production,
                   partCount: calculatedPartCount
@@ -338,10 +594,15 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
           return production;
         });
         
-        // Store'u da güncelle (senkronizasyon için)
-        productionStore.initialize(updated);
+        // Sadece değişiklik varsa state'i güncelle (aynı referans döndürme - gereksiz render'ı önle)
+        if (hasChanges) {
+          // Store'u da güncelle (senkronizasyon için)
+          productionStore.initialize(updated);
+          return updated;
+        }
         
-        return updated;
+        // Değişiklik yoksa aynı referansı döndür (React'in gereksiz render yapmasını önle)
+        return prevProductions;
       });
     };
 
@@ -427,79 +688,123 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
     setShowIssueModal(true);
   };
 
-  const handleResumeProduction = (productionId: string) => {
-    const production = productionStore.getAll().find(p => p.id === productionId);
+  const handleResumeProduction = async (productionId: string) => {
+    const production = activeProductions.find(p => p.id === productionId);
     if (!production) return;
 
-    // Durdurulma süresini hesapla ve startTime'ı güncelle
-    // Yeni startTime = şimdiki zaman - (durdurulma zamanına kadar geçen süre)
-    const now = new Date();
-    let newStartTime: Date;
-    
-    if (production.pausedAt && production.startTime) {
-      // Durdurulma zamanına kadar geçen süre
-      const elapsedBeforePause = production.pausedAt.getTime() - production.startTime.getTime();
-      // Yeni startTime = şimdiki zaman - durdurulma zamanına kadar geçen süre
-      newStartTime = new Date(now.getTime() - elapsedBeforePause);
-    } else {
-      // pausedAt yoksa, mevcut partCount'a göre hesapla
-      if (production.cycleTime && production.cycleTime > 0) {
-        const elapsedSeconds = production.partCount * production.cycleTime;
-        newStartTime = new Date(now.getTime() - (elapsedSeconds * 1000));
-      } else {
-        newStartTime = production.startTime;
+    try {
+      // Production ID'den work order ID'sini çıkar
+      const woIdMatch = production.id.match(/WO-(\d+)/);
+      if (!woIdMatch) {
+        throw new Error('Work order ID bulunamadı');
       }
-    }
+      const workOrderId = parseInt(woIdMatch[1], 10);
 
-    productionStore.update(productionId, {
-      status: 'active',
-      // issue ve pausedAt bilgilerini koru - geçmiş sorun bildirimi olarak kalacak
-      startTime: newStartTime, // Yeni başlangıç zamanı
-    });
-    
-    const active = productionStore.getActive();
-    setActiveProductions([...active]);
-    Alert.alert('Başarılı', 'Makine çalışmaya devam ediyor.');
+      // Work order'ın stage'lerini al
+      const stages = await workOrdersAPI.getWorkOrderStages(workOrderId);
+      const pausedStage = Array.isArray(stages) 
+        ? stages.find((s: any) => s.status === 'paused') 
+        : null;
+
+      if (!pausedStage) {
+        // Eğer paused stage yoksa, ilk planned stage'i başlat
+        const plannedStage = Array.isArray(stages) 
+          ? stages.find((s: any) => s.status === 'planned') 
+          : null;
+        
+        if (plannedStage) {
+          await stagesAPI.startStage(plannedStage.id);
+        } else {
+          throw new Error('Devam ettirilecek stage bulunamadı');
+        }
+      } else {
+        // Paused stage'i resume et (backend'de devam ettir)
+        await stagesAPI.resumeStage(pausedStage.id);
+      }
+
+      // Backend verilerini yeniden yükle
+      await loadBackendData();
+      
+      Alert.alert('Başarılı', 'Makine çalışmaya devam ediyor.');
+    } catch (error: any) {
+      console.error('Error resuming production:', error);
+      Alert.alert('Hata', error.message || 'Makine devam ettirilemedi. Lütfen tekrar deneyin.');
+    }
   };
 
-  const handleSubmitIssue = () => {
+  const handleSubmitIssue = async () => {
     if (!issueDescription.trim()) {
       Alert.alert('Hata', 'Lütfen sorun açıklaması girin!');
       return;
     }
 
     if (selectedProductionId) {
-      const production = productionStore.getAll().find(p => p.id === selectedProductionId);
+      const production = activeProductions.find(p => p.id === selectedProductionId);
       if (!production) return;
 
-      const pausedAt = new Date();
-      
-      // Durdurulduğunda o anki partCount'u hesapla ve kaydet
-      let pausedPartCount: number;
-      if (production.cycleTime && production.cycleTime > 0) {
-        // Durdurulma zamanına kadar geçen süre
-        const elapsedSeconds = (pausedAt.getTime() - production.startTime.getTime()) / 1000;
-        pausedPartCount = Math.floor(elapsedSeconds / production.cycleTime);
-      } else {
-        // Cycle time yoksa mevcut değeri kullan
-        pausedPartCount = production.partCount;
-      }
+      try {
+        // Production ID'den work order ID'sini çıkar (format: WO-{woId}-PRODUCT-{productId}-MOLD-{moldId})
+        const woIdMatch = production.id.match(/WO-(\d+)/);
+        if (!woIdMatch) {
+          throw new Error('Work order ID bulunamadı');
+        }
+        const workOrderId = parseInt(woIdMatch[1], 10);
 
-      productionStore.update(selectedProductionId, {
-        status: 'paused',
-        issue: issueDescription.trim(),
-        pausedAt: pausedAt,
-        partCount: pausedPartCount, // Durdurulduğunda o anki değeri kaydet
-      });
-      
-      const active = productionStore.getActive();
-      setActiveProductions([...active]);
-      
-      Alert.alert('Başarılı', 'Sorun bildirildi. Makine durduruldu.');
-      
-      setShowIssueModal(false);
-      setIssueDescription('');
-      setSelectedProductionId(null);
+        // Work order'ın stage'lerini al
+        const stages = await workOrdersAPI.getWorkOrderStages(workOrderId);
+        const activeStage = Array.isArray(stages) 
+          ? stages.find((s: any) => s.status === 'in_progress') 
+          : null;
+
+        if (!activeStage) {
+          throw new Error('Aktif stage bulunamadı');
+        }
+
+        // Backend'e issue gönder
+        await stagesAPI.issueStage(activeStage.id, {
+          type: 'machine_breakdown', // Varsayılan tip
+          description: issueDescription.trim(),
+        });
+
+        // Stage'i pause et (backend'de durdur)
+        await stagesAPI.pauseStage(activeStage.id);
+
+        const pausedAt = new Date();
+        
+        // Durdurulduğunda o anki partCount'u hesapla ve kaydet
+        let pausedPartCount: number;
+        if (production.cycleTime && production.cycleTime > 0) {
+          // Durdurulma zamanına kadar geçen süre
+          const elapsedSeconds = (pausedAt.getTime() - production.startTime.getTime()) / 1000;
+          pausedPartCount = Math.floor(elapsedSeconds / production.cycleTime);
+        } else {
+          // Cycle time yoksa mevcut değeri kullan
+          pausedPartCount = production.partCount;
+        }
+
+        // Local store'u güncelle (eğer kullanılıyorsa)
+        const productionInStore = productionStore.getAll().find(p => p.id === selectedProductionId);
+        if (productionInStore) {
+          productionStore.update(selectedProductionId, {
+            status: 'paused',
+            issue: issueDescription.trim(),
+            pausedAt: pausedAt,
+            partCount: pausedPartCount,
+          });
+        }
+
+        // Backend verilerini yeniden yükle
+        await loadBackendData();
+        
+        Alert.alert('Başarılı', 'Sorun bildirildi. Makine durduruldu. Yönetici ve planlayıcı bilgilendirildi.');
+        
+        setShowIssueModal(false);
+        setIssueDescription('');
+        setSelectedProductionId(null);
+      } catch (error: any) {
+        console.error('Error reporting issue:', error);
+        Alert.alert('Hata', error.message || 'Sorun bildirilemedi. Lütfen tekrar deneyin.');
+      }
     }
   };
 
@@ -539,22 +844,40 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Özet Kartları */}
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>{activeProductions.length}</Text>
+            <Text style={styles.summaryNumber}>
+              {activeProductions.filter(p => {
+                if (p.status === 'active') return true;
+                if (p.status === 'paused') {
+                  // Paused üretimler sadece hedef ürün sayısına ulaşmadıysa sayılır
+                  return p.targetCount === undefined || p.partCount < p.targetCount;
+                }
+                return false; // completed status'leri sayma
+              }).length}
+            </Text>
             <Text style={styles.summaryLabel}>Aktif Üretim</Text>
           </View>
         </View>
 
-        {/* Aktif Üretimler - Makine Kartları */}
-        {loading && activeProductions.length === 0 ? (
-          <View style={styles.sectionCard}>
-            <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
-          </View>
-        ) : activeProductions.length === 0 ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.emptyText}>Aktif üretim bulunmamaktadır.</Text>
-          </View>
-        ) : (
-          activeProductions.map((production: ProductionRecord) => {
+        {/* Aktif Üretimler - Makine Kartları - Aktif ve hedefe ulaşmamış duraklatılmış üretimler */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Aktif Üretimler</Text>
+          {(() => {
+            // Aktif üretimleri ve hedef ürün sayısına ulaşmamış duraklatılmış üretimleri filtrele
+            const activeAndPausedProductions = activeProductions.filter(p => {
+              if (p.status === 'active') return true;
+              if (p.status === 'paused') {
+                // Paused üretimler sadece hedef ürün sayısına ulaşmadıysa gösterilir
+                return p.targetCount === undefined || p.partCount < p.targetCount;
+              }
+              return false; // completed status'leri gösterme
+            });
+          
+            return loading && activeProductions.length === 0 ? (
+              <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
+            ) : activeAndPausedProductions.length === 0 ? (
+              <Text style={styles.emptyText}>Aktif üretim bulunmamaktadır.</Text>
+            ) : (
+              activeAndPausedProductions.map((production: ProductionRecord) => {
             const machine = backendMachines.find(m => m.id.toString() === production.machineId);
             // Database'den gelen mevcut üretilen ürün sayısını kullan (production.partCount)
             const calculatedPartCount = production.partCount || 0;
@@ -588,7 +911,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             
             // Durum
             const isRunning = production.status === 'active';
-            const statusText = isRunning ? 'Running' : 'Stopped';
+            const statusText = isRunning ? 'Çalışıyor' : 'Durduruldu';
             const statusColor = isRunning ? '#27ae60' : '#e74c3c';
             
             return (
@@ -640,56 +963,99 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <Text style={styles.machineDetail}>{material}</Text>
                   <Text style={styles.machineDetail}>{partWeight}g</Text>
                 </View>
+
+                {/* Durdur/Devam Et Butonları - Sadece worker için */}
+                {user.role === 'worker' && (
+                  <View style={styles.actionButtonsContainer}>
+                    {isRunning ? (
+                      <TouchableOpacity
+                        style={styles.stopButton}
+                        onPress={() => handleStopProduction(production.id)}
+                      >
+                        <Text style={styles.stopButtonText}>Durdur</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.resumeButton}
+                        onPress={() => handleResumeProduction(production.id)}
+                      >
+                        <Text style={styles.resumeButtonText}>Devam Et</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Sorun Bildirimi - Eğer varsa göster (tüm roller için) */}
+                {production.issue && (
+                  <View style={styles.issueContainer}>
+                    <Text style={styles.issueLabel}>
+                      ⚠️ Makine Durduruldu - Sorun:
+                    </Text>
+                    <Text style={styles.issueText}>{production.issue}</Text>
+                    {production.pausedAt && (
+                      <Text style={styles.issueTime}>
+                        Durdurulma Zamanı: {formatDateTime(production.pausedAt)}
+                      </Text>
+                    )}
+                  </View>
+                )}
               </View>
             );
-          })
-        )}
+            })
+          );
+        })()}
+        </View>
 
         {/* Makine Durumu */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Makine Durumu</Text>
-          {backendMachines.length === 0 ? (
-            <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>
-          ) : (
-            backendMachines.map((machine) => {
-              // Backend status değerlerini Türkçe'ye çevir
-              const getStatusText = (status: string) => {
-                if (status === 'active') return 'Çalışıyor';
-                if (status === 'maintenance') return 'Bakımda';
-                if (status === 'inactive') return 'Çalışmıyor';
-                return status; // Fallback
-              };
-
-              const getStatusColor = (status: string) => {
-                if (status === 'active') return '#27ae60'; // Yeşil - Çalışıyor
-                if (status === 'maintenance') return '#f39c12'; // Turuncu - Bakımda
-                if (status === 'inactive') return '#e74c3c'; // Kırmızı - Çalışmıyor
-                return '#95a5a6'; // Gri - Bilinmeyen
-              };
-
+          {(() => {
+            // Aktif ve hedefe ulaşmamış duraklatılmış üretimlerdeki makineleri filtrele
+            const activeAndPausedProductions = activeProductions.filter(p => {
+              if (p.status === 'active') return true;
+              if (p.status === 'paused') {
+                // Paused üretimler sadece hedef ürün sayısına ulaşmadıysa gösterilir
+                return p.targetCount === undefined || p.partCount < p.targetCount;
+              }
+              return false; // completed status'leri gösterme
+            });
+            const machineIdToProduction = new Map<string, ProductionRecord>();
+            activeAndPausedProductions.forEach(p => {
+              machineIdToProduction.set(p.machineId, p);
+            });
+            
+            // Aktif ve duraklatılmış üretimlerdeki makineleri bul
+            const machinesInUse = backendMachines.filter(m => 
+              machineIdToProduction.has(m.id.toString())
+            );
+            
+            if (machinesInUse.length === 0) {
+              return <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>;
+            }
+            
+            return machinesInUse.map((machine) => {
+              const production = machineIdToProduction.get(machine.id.toString());
+              const isRunning = production?.status === 'active';
+              const statusText = isRunning ? 'Çalışıyor' : 'Durdu';
+              const statusColor = isRunning ? '#27ae60' : '#e74c3c'; // Yeşil veya Kırmızı
+              
               return (
                 <View key={machine.id} style={styles.machineItem}>
                   <View style={styles.machineHeader}>
                     <Text style={styles.machineName}>{machine.name}</Text>
                     <View style={[
                       styles.statusBadge,
-                      { backgroundColor: getStatusColor(machine.status) }
+                      { backgroundColor: statusColor }
                     ]}>
                       <Text style={styles.statusBadgeText}>
-                        {getStatusText(machine.status)}
+                        {statusText}
                       </Text>
                     </View>
                   </View>
-                  {machine.machine_type && (
-                    <Text style={styles.machineDetail}>Tip: {machine.machine_type}</Text>
-                  )}
-                  {machine.location && (
-                    <Text style={styles.machineDetail}>Konum: {machine.location}</Text>
-                  )}
                 </View>
               );
-            })
-          )}
+            });
+          })()}
         </View>
 
         {/* Navigation Buttons */}

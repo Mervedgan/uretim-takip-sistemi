@@ -17,11 +17,12 @@ import {
 } from 'react-native';
 import { User, ProductionRecord, ProductionStage } from '../types';
 import { productionStore } from '../data/productionStore';
-import { workOrdersAPI, machinesAPI, stagesAPI, metricsAPI, productsAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, stagesAPI, metricsAPI, productsAPI, moldsAPI } from '../utils/api';
 
 interface OperatorScreenProps {
   user: User;
   onBack: () => void;
+  onProductionStarted?: () => void; // Üretim başlatıldığında çağrılacak callback
 }
 
 // Backend veri tipleri
@@ -61,7 +62,7 @@ interface MachineReading {
   timestamp: string;
 }
 
-const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
+const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProductionStarted }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'new'>('dashboard');
   
   // Dashboard state
@@ -78,6 +79,7 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
   // Form state
   const [productCode, setProductCode] = useState('');
   const [productName, setProductName] = useState('');
+  const [productId, setProductId] = useState<number | null>(null);
   const [lotNo, setLotNo] = useState('');
   const [targetCount, setTargetCount] = useState('');
   const [cycleTime, setCycleTime] = useState('');
@@ -86,6 +88,19 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
   const [stageNames, setStageNames] = useState<string[]>([]);
   const [showStages, setShowStages] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
+  
+  // Mold state
+  const [molds, setMolds] = useState<any[]>([]);
+  const [selectedMoldId, setSelectedMoldId] = useState<number | null>(null);
+  const [selectedMold, setSelectedMold] = useState<any | null>(null);
+  
+  // Mold bilgileri (database'den otomatik doldurulacak, kullanıcı değiştirebilir)
+  const [injectionTemp, setInjectionTemp] = useState('');
+  const [moldTemp, setMoldTemp] = useState('');
+  const [material, setMaterial] = useState('');
+  const [partWeight, setPartWeight] = useState('');
+  const [hourlyProduction, setHourlyProduction] = useState('');
+  const [cavityCount, setCavityCount] = useState('');
 
   // Load products when new production tab is active
   useEffect(() => {
@@ -93,6 +108,27 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       loadProducts();
     }
   }, [activeTab]);
+
+  // Ürün kodu değiştiğinde, eğer products listesinde varsa mold'ları yükle
+  useEffect(() => {
+    const loadMoldsIfProductFound = async () => {
+      if (productCode && products.length > 0) {
+        const product = products.find((p: any) => p.code === productCode);
+        if (product && product.id) {
+          setProductId(product.id);
+          setProductName(product.name);
+          await loadMoldsForProduct(product.id);
+        } else {
+          // Ürün bulunamadıysa temizle
+          setProductId(null);
+          setMolds([]);
+          setSelectedMoldId(null);
+          setSelectedMold(null);
+        }
+      }
+    };
+    loadMoldsIfProductFound();
+  }, [productCode, products]);
 
   // Load dashboard data
   useEffect(() => {
@@ -121,6 +157,40 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
     }
   };
 
+  // Ürün seçildiğinde o ürüne ait mold'ları yükle
+  const loadMoldsForProduct = async (productId: number) => {
+    try {
+      const allMolds = await moldsAPI.getMolds();
+      const productMolds = Array.isArray(allMolds) 
+        ? allMolds.filter((mold: any) => mold.product_id === productId)
+        : [];
+      setMolds(productMolds);
+      
+      // Eğer sadece bir mold varsa otomatik seç
+      if (productMolds.length === 1) {
+        handleMoldSelect(productMolds[0]);
+      }
+    } catch (error: any) {
+      console.error('Error loading molds:', error);
+      setMolds([]);
+    }
+  };
+
+  // Mold seçildiğinde bilgileri doldur
+  const handleMoldSelect = (mold: any) => {
+    setSelectedMoldId(mold.id);
+    setSelectedMold(mold);
+    
+    // Mold bilgilerini form alanlarına doldur
+    if (mold.cycle_time_sec) setCycleTime(mold.cycle_time_sec.toString());
+    if (mold.injection_temp_c) setInjectionTemp(mold.injection_temp_c.toString());
+    if (mold.mold_temp_c) setMoldTemp(mold.mold_temp_c.toString());
+    if (mold.material) setMaterial(mold.material);
+    if (mold.part_weight_g) setPartWeight(mold.part_weight_g.toString());
+    if (mold.hourly_production) setHourlyProduction(mold.hourly_production.toString());
+    if (mold.cavity_count) setCavityCount(mold.cavity_count.toString());
+  };
+
   const loadDashboardData = async () => {
     try {
       setLoading(true);
@@ -129,7 +199,10 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       const woResponse = await workOrdersAPI.getWorkOrders();
       // Backend returns { total, data, requested_by } or just array
       const woData = woResponse.data || woResponse;
-      setWorkOrders(Array.isArray(woData) ? woData : []);
+      const allWorkOrders = Array.isArray(woData) ? woData : [];
+      
+      // Tüm work orders'ları set et (filtreleme renderDashboard'da yapılacak)
+      setWorkOrders(allWorkOrders);
 
       // Load machines
       const machinesResponse = await machinesAPI.getMachines();
@@ -186,6 +259,10 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
         await loadWorkOrderStages(selectedWorkOrder);
       }
       loadDashboardData(); // Refresh dashboard
+      // DashboardScreen'i de yenile (aktif üretimler bölümü için)
+      if (onProductionStarted) {
+        onProductionStarted();
+      }
     } catch (error: any) {
       console.error('Error starting stage:', error);
       Alert.alert('Hata', error.message || 'Aşama başlatılamadı');
@@ -208,6 +285,10 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
         await loadWorkOrderStages(selectedWorkOrder);
       }
       loadDashboardData(); // Refresh dashboard
+      // DashboardScreen'i de yenile (aktif üretimler bölümü için)
+      if (onProductionStarted) {
+        onProductionStarted();
+      }
     } catch (error: any) {
       console.error('Error completing stage:', error);
       Alert.alert('Hata', error.message || 'Aşama tamamlanamadı');
@@ -284,13 +365,50 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
     try {
       setLoading(true);
 
+      // Ürün kodunun database'de olup olmadığını kontrol et
+      const trimmedProductCode = productCode.trim();
+      let productExists = false;
+      
+      try {
+        const allProducts = await productsAPI.getProducts();
+        const productArray = Array.isArray(allProducts) ? allProducts : [];
+        productExists = productArray.some((p: any) => 
+          p.code && p.code.toLowerCase() === trimmedProductCode.toLowerCase()
+        );
+      } catch (error) {
+        console.error('Error checking products:', error);
+        // Hata olsa bile devam et, belki ürün zaten var
+      }
+
+      // Eğer ürün database'de yoksa, yeni ürün oluştur
+      if (!productExists) {
+        try {
+          const productNameToUse = productName.trim() || trimmedProductCode;
+          console.log('📦 Yeni ürün oluşturuluyor:', { code: trimmedProductCode, name: productNameToUse });
+          await productsAPI.createProduct({
+            code: trimmedProductCode,
+            name: productNameToUse,
+            description: `Otomatik oluşturuldu - ${new Date().toLocaleString('tr-TR')}`
+          });
+          console.log('✅ Yeni ürün oluşturuldu:', trimmedProductCode);
+          
+          // Ürün listesini yenile
+          await loadProducts();
+        } catch (productError: any) {
+          console.error('Ürün oluşturma hatası:', productError);
+          // Ürün oluşturulamazsa kullanıcıya bilgi ver ama devam et
+          const errorMessage = productError.response?.data?.detail || productError.message || 'Bilinmeyen hata';
+          console.warn('⚠️ Ürün oluşturulamadı, work order oluşturulmaya devam ediliyor:', errorMessage);
+        }
+      }
+
       // Tarih hesaplamaları - şimdi başla, 4 saat sonra bitir (varsayılan)
       const now = new Date();
       const endTime = new Date(now.getTime() + 4 * 60 * 60 * 1000); // 4 saat sonra
 
       // Backend'e work order oluştur
       const workOrderData = {
-        product_code: productCode.trim(),
+        product_code: trimmedProductCode,
         lot_no: lotNo.trim(),
         qty: parseInt(targetCount),
         planned_start: now.toISOString(),
@@ -301,16 +419,25 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       const result = await workOrdersAPI.createWorkOrder(workOrderData);
       
       // Work order oluşturulduktan sonra ilk stage'i başlat
+      let stageStarted = false;
       if (result.work_order_id && result.stages && result.stages.length > 0) {
         const firstStageId = result.stages[0].id;
         if (firstStageId && typeof firstStageId === 'number') {
           try {
             await stagesAPI.startStage(firstStageId);
             console.log('✅ İlk stage başlatıldı:', firstStageId);
+            stageStarted = true;
+            // Stage başlatıldıktan sonra veritabanı güncellemesi için bekleme ekle
+            await new Promise(resolve => setTimeout(resolve, 1500));
           } catch (stageError: any) {
             const errorMessage = stageError.response?.data?.detail || stageError.message || 'Bilinmeyen hata';
             console.error('⚠️ Stage başlatılamadı (work order oluşturuldu):', errorMessage);
             // Stage başlatılamasa bile devam et - work order zaten oluşturuldu
+            // Ama kullanıcıya bilgi ver
+            Alert.alert(
+              'Uyarı',
+              `İş emri oluşturuldu (ID: ${result.work_order_id}) ancak aşama başlatılamadı.\n\nHata: ${errorMessage}\n\nLütfen Dashboard'dan manuel olarak aşamayı başlatın.`
+            );
           }
         } else {
           console.warn('⚠️ Stage ID geçersiz:', firstStageId);
@@ -320,6 +447,7 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       // Formu temizle
       setProductCode('');
       setProductName('');
+      setProductId(null);
       setLotNo('');
       setTargetCount('');
       setCycleTime('');
@@ -327,13 +455,45 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
       setStageCount('');
       setStageNames([]);
       setShowStages(false);
+      
+      // Mold bilgilerini temizle
+      setMolds([]);
+      setSelectedMoldId(null);
+      setSelectedMold(null);
+      setInjectionTemp('');
+      setMoldTemp('');
+      setMaterial('');
+      setPartWeight('');
+      setHourlyProduction('');
+      setCavityCount('');
 
+      const successMessage = stageStarted 
+        ? `Üretim başlatıldı!\nWork Order ID: ${result.work_order_id}\nDashboard'daki "Aktif Üretimler" bölümünden takip edebilirsiniz.`
+        : `İş emri oluşturuldu!\nWork Order ID: ${result.work_order_id}\nNot: Aşama başlatılamadı, lütfen Dashboard'dan manuel olarak başlatın.`;
+      
       Alert.alert(
         'Başarılı', 
-        `Üretim başlatıldı!\nWork Order ID: ${result.work_order_id}\nDashboard'daki "Aktif Üretimler" bölümünden takip edebilirsiniz.`,
-        [{ text: 'Tamam', onPress: () => {
+        successMessage,
+        [{ text: 'Tamam', onPress: async () => {
+          // Veritabanı güncellemesinin tamamlanması için bekleme
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Ana Dashboard'ı yenile (eğer callback varsa)
+          if (onProductionStarted) {
+            onProductionStarted();
+          }
+          
+          // OperatorScreen'in kendi dashboard'ına geç ve yenile
           setActiveTab('dashboard');
-          loadDashboardData(); // Dashboard'ı yenile
+          await loadDashboardData();
+          
+          // Ek refresh'ler (stage'lerin güncellenmesi için)
+          setTimeout(() => {
+            loadDashboardData();
+          }, 1500);
+          setTimeout(() => {
+            loadDashboardData();
+          }, 3000);
         }}]
       );
     } catch (error: any) {
@@ -387,9 +547,20 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
   };
 
   const renderDashboard = () => {
+    // Aktif iş emirleri: Bitiş tarihi gelecekte olan tüm iş emirleri
+    // Planner'ın oluşturduğu iş emirleri de dahil (stage durumuna bakmadan)
+    // Çünkü planner'ın oluşturduğu iş emirleri henüz başlatılmamış olabilir
+    const now = new Date();
     const activeWorkOrders = workOrders.filter(wo => {
-      const endDate = new Date(wo.planned_end);
-      return endDate > new Date();
+      if (!wo.planned_end) return false;
+      try {
+        const endDate = new Date(wo.planned_end);
+        // Bitiş tarihi gelecekte olan tüm iş emirlerini göster
+        return endDate > now;
+      } catch (error) {
+        console.error('Error parsing planned_end date:', wo.planned_end, error);
+        return false;
+      }
     });
 
     return (
@@ -588,7 +759,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
               value={productCode}
               onChangeText={setProductCode}
               placeholder="Örn: PRD-001, PRD-002..."
-              autoCapitalize="none"
             />
             <Text style={styles.hintText}>
               Database'de kayıtlı ürün kodunu girin
@@ -600,9 +770,12 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
                   <TouchableOpacity
                     key={product.id}
                     style={styles.productItem}
-                    onPress={() => {
+                    onPress={async () => {
                       setProductCode(product.code);
                       setProductName(product.name);
+                      setProductId(product.id);
+                      // Ürüne ait mold'ları yükle
+                      await loadMoldsForProduct(product.id);
                     }}
                   >
                     <Text style={styles.productItemText}>
@@ -621,7 +794,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
               value={lotNo}
               onChangeText={setLotNo}
               placeholder="Örn: LOT-001, LOT-2024-01..."
-              autoCapitalize="none"
             />
             <Text style={styles.hintText}>
               Bu üretim için lot numarası girin
@@ -642,6 +814,32 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
             </Text>
           </View>
 
+          {/* Mold Seçimi - Sadece ürün seçildiyse göster */}
+          {productId && molds.length > 0 && (
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Kalıp Seçimi *</Text>
+              <ScrollView style={styles.moldsList} nestedScrollEnabled={true}>
+                {molds.map((mold) => (
+                  <TouchableOpacity
+                    key={mold.id}
+                    style={[
+                      styles.moldItem,
+                      selectedMoldId === mold.id && styles.moldItemSelected
+                    ]}
+                    onPress={() => handleMoldSelect(mold)}
+                  >
+                    <Text style={styles.moldItemText}>
+                      {mold.code} - {mold.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <Text style={styles.hintText}>
+                Bu ürün için kullanılacak kalıbı seçin (kalıp bilgileri otomatik doldurulacak)
+              </Text>
+            </View>
+          )}
+
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Cycle Time (Saniye) *</Text>
             <TextInput
@@ -655,6 +853,93 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
               Bir ürünün üretilmesi için geçen süre (saniye cinsinden)
             </Text>
           </View>
+
+          {/* Mold Bilgileri - Her zaman görünür */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Enjeksiyon Sıcaklığı (°C)</Text>
+            <TextInput
+              style={styles.input}
+              value={injectionTemp}
+              onChangeText={setInjectionTemp}
+              placeholder="Örn: 220"
+              keyboardType="numeric"
+            />
+            <Text style={styles.hintText}>
+              Enjeksiyon sıcaklığı (santigrat derece)
+            </Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Kalıp Sıcaklığı (°C)</Text>
+            <TextInput
+              style={styles.input}
+              value={moldTemp}
+              onChangeText={setMoldTemp}
+              placeholder="Örn: 60"
+              keyboardType="numeric"
+            />
+            <Text style={styles.hintText}>
+              Kalıp sıcaklığı (santigrat derece)
+            </Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Malzeme</Text>
+            <TextInput
+              style={styles.input}
+              value={material}
+              onChangeText={setMaterial}
+              placeholder="Örn: PP, ABS, PC..."
+            />
+            <Text style={styles.hintText}>
+              Kullanılacak malzeme tipi
+            </Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Parça Ağırlığı (g)</Text>
+            <TextInput
+              style={styles.input}
+              value={partWeight}
+              onChangeText={setPartWeight}
+              placeholder="Örn: 15"
+              keyboardType="numeric"
+            />
+            <Text style={styles.hintText}>
+              Üretilecek parçanın ağırlığı (gram)
+            </Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Saatlik Üretim (adet)</Text>
+            <TextInput
+              style={styles.input}
+              value={hourlyProduction}
+              onChangeText={setHourlyProduction}
+              placeholder="Örn: 720"
+              keyboardType="numeric"
+            />
+            <Text style={styles.hintText}>
+              Saatte üretilecek parça sayısı
+            </Text>
+          </View>
+
+          {/* Göz Adedi - Sadece mold seçildiyse göster (opsiyonel) */}
+          {selectedMold && (
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Göz Adedi</Text>
+              <TextInput
+                style={styles.input}
+                value={cavityCount}
+                onChangeText={setCavityCount}
+                placeholder="Örn: 4"
+                keyboardType="numeric"
+              />
+              <Text style={styles.hintText}>
+                Kalıptaki göz (cavity) sayısı
+              </Text>
+            </View>
+          )}
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Üretim Aşama Sayısı (Opsiyonel)</Text>
@@ -682,6 +967,7 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack }) => {
                     value={stageName}
                     onChangeText={(name) => handleStageNameChange(index, name)}
                     placeholder={`Aşama ${index + 1} adı (örn: Parça Basım)`}
+                    autoCapitalize="sentences"
                   />
                 </View>
               ))}
@@ -1097,6 +1383,29 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     marginBottom: 8,
     lineHeight: 20,
+  },
+  moldsList: {
+    maxHeight: 150,
+    marginTop: 10,
+    marginBottom: 5,
+  },
+  moldItem: {
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  moldItemSelected: {
+    borderColor: '#3498db',
+    backgroundColor: '#ebf5fb',
+    borderWidth: 2,
+  },
+  moldItemText: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
   },
 });
 

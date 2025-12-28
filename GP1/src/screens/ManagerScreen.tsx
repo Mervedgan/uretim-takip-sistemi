@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { User, ProductionRecord, Machine, ProductionAnalysis, OperatorPerformance, MachinePerformance, DailyProduction } from '../types';
-import { workOrdersAPI, machinesAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, issuesAPI } from '../utils/api';
 
 interface ManagerScreenProps {
   user: User;
@@ -51,11 +51,26 @@ interface BackendMachine {
   status: string;
 }
 
+interface Issue {
+  id: number;
+  work_order_stage_id: number;
+  type: string;
+  description: string | null;
+  status: string;
+  created_by: number;
+  created_at: string;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+}
+
 const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
   const [activeProductions, setActiveProductions] = useState<ProductionRecord[]>([]);
   const [productionAnalysis, setProductionAnalysis] = useState<ProductionAnalysis | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(false);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [workOrderStages, setWorkOrderStages] = useState<Map<number, WorkOrderStage[]>>(new Map());
 
   // Backend'den veri yükle
   const loadBackendData = async () => {
@@ -66,6 +81,7 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
       const woResponse = await workOrdersAPI.getWorkOrders();
       const woData = woResponse.data || woResponse;
       const allWorkOrders: WorkOrder[] = Array.isArray(woData) ? woData : [];
+      setWorkOrders(allWorkOrders);
 
       // Her work order için stages yükle
       const stagesMap = new Map<number, WorkOrderStage[]>();
@@ -77,6 +93,22 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
           console.error(`Error loading stages for WO ${wo.id}:`, error);
           stagesMap.set(wo.id, []);
         }
+      }
+      setWorkOrderStages(stagesMap);
+
+      // Issues yükle
+      try {
+        const issuesResponse = await issuesAPI.listIssues();
+        const issuesData = issuesResponse.data || issuesResponse;
+        const allIssues: Issue[] = Array.isArray(issuesData) ? issuesData : [];
+        // Sadece açık (open) ve kabul edilmiş (acknowledged) sorunları göster
+        const activeIssues = allIssues.filter(issue => 
+          issue.status === 'open' || issue.status === 'acknowledged'
+        );
+        setIssues(activeIssues);
+      } catch (error) {
+        console.error('Error loading issues:', error);
+        setIssues([]);
       }
 
       // Machines yükle
@@ -169,8 +201,9 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
                          firstStage?.planned_start || 
                          wo.planned_start;
         
-        const endTime = doneStages.length === stages.length && doneStages[doneStages.length - 1]?.actual_end
-          ? new Date(doneStages[doneStages.length - 1].actual_end)
+        const lastDoneStage = doneStages.length === stages.length ? doneStages[doneStages.length - 1] : null;
+        const endTime = lastDoneStage?.actual_end
+          ? new Date(lastDoneStage.actual_end)
           : undefined;
 
         let cycleTime: number | undefined = 3;
@@ -207,7 +240,7 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
           partCount: producedCount,
           targetCount: wo.qty,
           cycleTime: cycleTime,
-          status: (inProgressStage ? 'active' : doneStages.length === stages.length ? 'completed' : 'paused') as const,
+          status: inProgressStage ? 'active' : doneStages.length === stages.length ? 'completed' : 'paused',
         };
       });
 
@@ -453,59 +486,6 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
           <Text style={styles.infoText}>Genel üretim analizleri ve raporlar</Text>
         </View>
 
-        {/* Aktif Üretimler ve Sorun Bildirimleri */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Aktif Üretimler ve Makine Durumları</Text>
-          {loading ? (
-            <ActivityIndicator size="small" color="#e74c3c" style={{ marginVertical: 20 }} />
-          ) : activeProductions.length === 0 ? (
-            <Text style={styles.emptyText}>Aktif üretim bulunmamaktadır.</Text>
-          ) : (
-            activeProductions.map((production: ProductionRecord) => {
-              const machine = machines.find(m => m.id === production.machineId);
-              return (
-                <View key={production.id} style={styles.productionCard}>
-                  <View style={styles.productionHeader}>
-                    <Text style={styles.productionProduct}>{production.productName}</Text>
-                    <View style={[
-                      styles.statusBadge,
-                      production.status === 'active' ? styles.activeBadge : styles.pausedBadge
-                    ]}>
-                      <Text style={styles.statusBadgeText}>
-                        {production.status === 'active' ? 'Aktif' : 'Durduruldu'}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.productionDetail}>
-                    Makine: {machine?.name || production.machineId}
-                  </Text>
-                  <Text style={styles.productionDetail}>
-                    Operatör: {production.operatorName}
-                  </Text>
-                  <Text style={styles.productionDetail}>
-                    Başlangıç: {formatDateTime(production.startTime)}
-                  </Text>
-                  
-                  {/* Sorun Bildirimi - Geçmiş sorun bildirimleri (aktif olsa bile) */}
-                  {production.issue && (
-                    <View style={styles.issueContainer}>
-                      <Text style={styles.issueLabel}>
-                        {production.status === 'paused' ? '⚠️ Makine Durduruldu - Sorun:' : '⚠️ Geçmiş Sorun Bildirimi:'}
-                      </Text>
-                      <Text style={styles.issueText}>{production.issue}</Text>
-                      {production.pausedAt && (
-                        <Text style={styles.issueTime}>
-                          Durdurulma Zamanı: {formatDateTime(new Date(production.pausedAt))}
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                </View>
-              );
-            })
-          )}
-        </View>
-
         {/* Genel Özet */}
         {productionAnalysis && (
           <View style={styles.summaryCard}>
@@ -536,6 +516,60 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
                 <Text style={styles.summaryLabel}>Ort. Verimlilik</Text>
               </View>
             </View>
+          </View>
+        )}
+
+        {/* Sorun Bildirimleri */}
+        {issues.length > 0 && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>⚠️ Sorun Bildirimleri</Text>
+            {issues.map((issue) => {
+              // Issue'un hangi work order ve stage'e ait olduğunu bul
+              let workOrderId: number | null = null;
+              let stageName = 'Bilinmeyen Aşama';
+              let productCode = 'Bilinmeyen Ürün';
+              
+              for (const [woId, stages] of workOrderStages.entries()) {
+                const stage = stages.find(s => s.id === issue.work_order_stage_id);
+                if (stage) {
+                  workOrderId = woId;
+                  stageName = stage.stage_name;
+                  // Work order'ı bul
+                  const workOrder = workOrders.find(wo => wo.id === woId);
+                  if (workOrder) {
+                    productCode = workOrder.product_code;
+                  }
+                  break;
+                }
+              }
+
+              const issueDate = new Date(issue.created_at);
+              const statusText = issue.status === 'open' ? 'Açık' : 
+                                issue.status === 'acknowledged' ? 'Kabul Edildi' : 
+                                'Çözüldü';
+              const statusColor = issue.status === 'open' ? '#e74c3c' : 
+                                 issue.status === 'acknowledged' ? '#f39c12' : 
+                                 '#27ae60';
+
+              return (
+                <View key={issue.id} style={styles.issueCard}>
+                  <View style={styles.issueHeader}>
+                    <Text style={styles.issueTitle}>İş Emri #{workOrderId || 'N/A'} - {stageName}</Text>
+                    <View style={[styles.issueStatusBadge, { backgroundColor: statusColor }]}>
+                      <Text style={styles.issueStatusText}>{statusText}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.issueProductCode}>Ürün: {productCode}</Text>
+                  <Text style={styles.issueDescription}>{issue.description || 'Açıklama yok'}</Text>
+                  <Text style={styles.issueTime}>
+                    Bildirilme: {formatDateTime(issueDate)}
+                  </Text>
+                  {issue.type && (
+                    <Text style={styles.issueType}>Tip: {issue.type}</Text>
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -942,6 +976,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#856404',
     fontStyle: 'italic',
+  },
+  issueCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#e74c3c',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  issueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  issueTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2c3e50',
+    flex: 1,
+  },
+  issueStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  issueStatusText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  issueProductCode: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginBottom: 8,
+  },
+  issueDescription: {
+    fontSize: 14,
+    color: '#2c3e50',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  issueType: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
   emptyText: {
     fontSize: 14,

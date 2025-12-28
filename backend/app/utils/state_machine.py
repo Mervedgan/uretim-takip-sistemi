@@ -1,11 +1,12 @@
 """
 Stage state machine validation
-Valid transitions: planned -> in_progress -> done
+Valid transitions: planned -> in_progress -> (done | paused) -> in_progress
 """
 
 VALID_TRANSITIONS = {
     "planned": ["in_progress"],
-    "in_progress": ["done"],
+    "in_progress": ["done", "paused"],  # in_progress'ten done veya paused'a geçilebilir
+    "paused": ["in_progress"],  # paused'dan sadece in_progress'e geçilebilir
     "done": []  # Terminal state
 }
 

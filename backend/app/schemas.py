@@ -41,6 +41,7 @@ class WorkOrderCreate(BaseModel):
     produced_qty: Optional[int] = Field(0, ge=0)  # Mevcut üretilen ürün sayısı (varsayılan: 0)
     planned_start: datetime
     planned_end: datetime
+    stage_count: Optional[int] = Field(2, ge=1)  # Üretim aşama sayısı (varsayılan: 2)
 
 
 # 📦 Ürün Schemas

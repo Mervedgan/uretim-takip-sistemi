@@ -54,18 +54,18 @@ def get_product(
 
 
 # ---------------------------------------------------------
-# ✅ Ürün Oluştur: Sadece planner veya admin
+# ✅ Ürün Oluştur: planner, admin veya worker
 # ---------------------------------------------------------
 @router.post("/", response_model=ProductResponse)
 def create_product(
     product_data: ProductCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_roles("planner", "admin"))  # ✅ planner + admin
+    current_user: dict = Depends(require_roles("planner", "admin", "worker"))  # ✅ planner + admin + worker
 ):
     """
     Yeni ürün oluşturur.
     
-    **Yetki:** "planner" veya "admin" rolü
+    **Yetki:** "planner", "admin" veya "worker" rolü
     """
     # Aynı kod ile ürün var mı kontrol et
     existing = db.query(Product).filter(Product.code == product_data.code).first()

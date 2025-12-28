@@ -16,7 +16,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { User } from '../types';
-import { workOrdersAPI, stagesAPI, machinesAPI } from '../utils/api';
+import { workOrdersAPI, stagesAPI, machinesAPI, issuesAPI } from '../utils/api';
 
 interface PlannerScreenProps {
   user: User;
@@ -52,6 +52,18 @@ interface Machine {
   status: string;
 }
 
+interface Issue {
+  id: number;
+  work_order_stage_id: number;
+  type: string;
+  description: string | null;
+  status: string;
+  created_by: number;
+  created_at: string;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+}
+
 const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'new'>('dashboard');
   
@@ -62,6 +74,8 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [stages, setStages] = useState<WorkOrderStage[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [workOrderStages, setWorkOrderStages] = useState<Map<number, WorkOrderStage[]>>(new Map());
 
   // Work Order form state
   const [productCode, setProductCode] = useState('');
@@ -69,6 +83,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [qty, setQty] = useState('');
   const [plannedStart, setPlannedStart] = useState('');
   const [plannedEnd, setPlannedEnd] = useState('');
+  const [stageCount, setStageCount] = useState('2'); // Varsayılan 2 aşama
 
   // Load dashboard data
   useEffect(() => {
@@ -94,7 +109,36 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       // Load work orders
       const woResponse = await workOrdersAPI.getWorkOrders();
       const woData = woResponse.data || woResponse;
-      setWorkOrders(Array.isArray(woData) ? woData : []);
+      const allWorkOrders: WorkOrder[] = Array.isArray(woData) ? woData : [];
+      setWorkOrders(allWorkOrders);
+
+      // Her work order için stages yükle
+      const stagesMap = new Map<number, WorkOrderStage[]>();
+      for (const wo of allWorkOrders) {
+        try {
+          const stages = await workOrdersAPI.getWorkOrderStages(wo.id);
+          stagesMap.set(wo.id, Array.isArray(stages) ? stages : []);
+        } catch (error) {
+          console.error(`Error loading stages for WO ${wo.id}:`, error);
+          stagesMap.set(wo.id, []);
+        }
+      }
+      setWorkOrderStages(stagesMap);
+
+      // Issues yükle
+      try {
+        const issuesResponse = await issuesAPI.listIssues();
+        const issuesData = issuesResponse.data || issuesResponse;
+        const allIssues: Issue[] = Array.isArray(issuesData) ? issuesData : [];
+        // Sadece açık (open) ve kabul edilmiş (acknowledged) sorunları göster
+        const activeIssues = allIssues.filter(issue => 
+          issue.status === 'open' || issue.status === 'acknowledged'
+        );
+        setIssues(activeIssues);
+      } catch (error) {
+        console.error('Error loading issues:', error);
+        setIssues([]);
+      }
 
       // Load machines
       const machinesResponse = await machinesAPI.getMachines();
@@ -180,6 +224,11 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       return;
     }
 
+    if (!stageCount.trim() || isNaN(parseInt(stageCount)) || parseInt(stageCount) <= 0) {
+      Alert.alert('Hata', 'Lütfen geçerli bir aşama sayısı girin! (En az 1)');
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -208,6 +257,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         qty: parseInt(qty),
         planned_start: startDate.toISOString(),
         planned_end: endDate.toISOString(),
+        stage_count: parseInt(stageCount),
       };
 
       console.log('📤 PlannerScreen - İş emri oluşturuluyor:', workOrderData);
@@ -223,6 +273,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           setQty('');
           setPlannedStart('');
           setPlannedEnd('');
+          setStageCount('2');
           // Dashboard'a geç ve verileri yenile
           setActiveTab('dashboard');
           loadDashboardData();
@@ -288,6 +339,60 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         <View style={styles.userInfo}>
           <Text style={styles.welcomeText}>Planlayıcı: {user.name}</Text>
         </View>
+
+        {/* Sorun Bildirimleri */}
+        {issues.length > 0 && (
+          <View style={styles.dashboardCard}>
+            <Text style={styles.cardTitle}>⚠️ Sorun Bildirimleri</Text>
+            {issues.map((issue) => {
+              // Issue'un hangi work order ve stage'e ait olduğunu bul
+              let workOrderId: number | null = null;
+              let stageName = 'Bilinmeyen Aşama';
+              let productCode = 'Bilinmeyen Ürün';
+              
+              for (const [woId, stages] of workOrderStages.entries()) {
+                const stage = stages.find(s => s.id === issue.work_order_stage_id);
+                if (stage) {
+                  workOrderId = woId;
+                  stageName = stage.stage_name;
+                  // Work order'ı bul
+                  const workOrder = workOrders.find(wo => wo.id === woId);
+                  if (workOrder) {
+                    productCode = workOrder.product_code;
+                  }
+                  break;
+                }
+              }
+
+              const issueDate = new Date(issue.created_at);
+              const statusText = issue.status === 'open' ? 'Açık' : 
+                                issue.status === 'acknowledged' ? 'Kabul Edildi' : 
+                                'Çözüldü';
+              const statusColor = issue.status === 'open' ? '#e74c3c' : 
+                                 issue.status === 'acknowledged' ? '#f39c12' : 
+                                 '#27ae60';
+
+              return (
+                <View key={issue.id} style={styles.issueCard}>
+                  <View style={styles.issueHeader}>
+                    <Text style={styles.issueTitle}>İş Emri #{workOrderId || 'N/A'} - {stageName}</Text>
+                    <View style={[styles.issueStatusBadge, { backgroundColor: statusColor }]}>
+                      <Text style={styles.issueStatusText}>{statusText}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.issueProductCode}>Ürün: {productCode}</Text>
+                  <Text style={styles.issueDescription}>{issue.description || 'Açıklama yok'}</Text>
+                  <Text style={styles.issueTime}>
+                    Bildirilme: {formatDate(issue.created_at)}
+                  </Text>
+                  {issue.type && (
+                    <Text style={styles.issueType}>Tip: {issue.type}</Text>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* Aktif İş Emirleri */}
         <View style={styles.dashboardCard}>
@@ -433,7 +538,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
               value={productCode}
               onChangeText={setProductCode}
               placeholder="Örn: PROD-001"
-              autoCapitalize="none"
             />
           </View>
 
@@ -444,7 +548,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
               value={lotNo}
               onChangeText={setLotNo}
               placeholder="Örn: LOT-2024-001"
-              autoCapitalize="none"
             />
           </View>
 
@@ -485,6 +588,20 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
             </Text>
           </View>
 
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Üretim Aşama Sayısı *</Text>
+            <TextInput
+              style={styles.input}
+              value={stageCount}
+              onChangeText={setStageCount}
+              placeholder="Örn: 2"
+              keyboardType="numeric"
+            />
+            <Text style={styles.hintText}>
+              Oluşturulacak üretim aşaması sayısı (örn: 2, 3, 4...)
+            </Text>
+          </View>
+
           <TouchableOpacity 
             style={styles.createButton} 
             onPress={handleCreateWorkOrder}
@@ -497,7 +614,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>ℹ️ Bilgi</Text>
           <Text style={styles.infoText}>
-            • İş emri oluşturulduğunda otomatik olarak 2 aşama (Enjeksiyon ve Montaj) oluşturulur.
+            • İş emri oluşturulduğunda belirttiğiniz sayıda aşama otomatik olarak oluşturulur.
           </Text>
           <Text style={styles.infoText}>
             • İş emirlerini Dashboard sekmesinden görüntüleyebilir ve aşamaları başlatabilirsiniz.
@@ -808,6 +925,63 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginBottom: 5,
     lineHeight: 20,
+  },
+  issueCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#e74c3c',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  issueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  issueTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2c3e50',
+    flex: 1,
+  },
+  issueStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  issueStatusText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  issueProductCode: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginBottom: 8,
+  },
+  issueDescription: {
+    fontSize: 14,
+    color: '#2c3e50',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  issueTime: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontStyle: 'italic',
+  },
+  issueType: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });
 

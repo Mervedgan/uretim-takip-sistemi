@@ -32,7 +32,7 @@ export interface ProductionStage {
   order: number; // Aşama sırası (1, 2, 3...)
   startTime?: Date;
   endTime?: Date;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'paused' | 'completed';
 }
 
 // Üretim kaydı - Operatör tarafından oluşturulur

@@ -24,6 +24,7 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
 
   // Check if user is already authenticated on app start
   useEffect(() => {
@@ -85,6 +86,8 @@ function App() {
 
   const handleBackToDashboard = () => {
     setCurrentScreen('dashboard');
+    // Dashboard'a dönüldüğünde refresh tetikle
+    setDashboardRefreshTrigger(prev => prev + 1);
   };
 
   const handleNavigateToProducts = () => {
@@ -100,7 +103,14 @@ function App() {
 
     switch (user.role) {
       case 'worker':
-        return <OperatorScreen user={user} onBack={handleBackToDashboard} />;
+        return <OperatorScreen 
+          user={user} 
+          onBack={handleBackToDashboard}
+          onProductionStarted={() => {
+            // Üretim başlatıldığında Dashboard'ı yenile
+            setDashboardRefreshTrigger(prev => prev + 1);
+          }}
+        />;
       case 'planner':
         return <PlannerScreen user={user} onBack={handleBackToDashboard} />;
       case 'admin':
@@ -152,6 +162,7 @@ function App() {
           onNavigateToRoleScreen={handleNavigateToRoleScreen}
           onNavigateToProducts={handleNavigateToProducts}
           onNavigateToMolds={handleNavigateToMolds}
+          refreshTrigger={dashboardRefreshTrigger}
         />
       ) : currentScreen === 'products' ? (
         <ProductsScreen 
