@@ -76,6 +76,14 @@ def create_product(
         code=product_data.code,
         name=product_data.name,
         description=product_data.description,
+        # Molds'tan taşınan alanlar (Excel kolonları)
+        cavity_count=product_data.cavity_count,
+        cycle_time_sec=product_data.cycle_time_sec,
+        injection_temp_c=product_data.injection_temp_c,
+        mold_temp_c=product_data.mold_temp_c,
+        material=product_data.material,
+        part_weight_g=product_data.part_weight_g,
+        hourly_production=product_data.hourly_production,
     )
     
     db.add(product)
@@ -109,6 +117,22 @@ def update_product(
         product.name = product_data.name
     if product_data.description is not None:
         product.description = product_data.description
+    
+    # Molds'tan taşınan alanlar (Excel kolonları)
+    if product_data.cavity_count is not None:
+        product.cavity_count = product_data.cavity_count
+    if product_data.cycle_time_sec is not None:
+        product.cycle_time_sec = product_data.cycle_time_sec
+    if product_data.injection_temp_c is not None:
+        product.injection_temp_c = product_data.injection_temp_c
+    if product_data.mold_temp_c is not None:
+        product.mold_temp_c = product_data.mold_temp_c
+    if product_data.material is not None:
+        product.material = product_data.material
+    if product_data.part_weight_g is not None:
+        product.part_weight_g = product_data.part_weight_g
+    if product_data.hourly_production is not None:
+        product.hourly_production = product_data.hourly_production
     
     product.updated_at = datetime.now(timezone.utc)
     

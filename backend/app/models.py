@@ -26,6 +26,7 @@ class WorkOrder(Base):
     planned_start = Column(DateTime, nullable=True)
     planned_end = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # Work order'ı oluşturan kullanıcı
+    machine_id = Column(Integer, ForeignKey("machines.id"), nullable=True)  # Üretim için seçilen makine
 
 
 # 🔄 İş Emri Aşamaları tablosu
@@ -97,6 +98,16 @@ class Product(Base):
     code = Column(String, unique=True, index=True)  # Ürün kodu (örn: PRD-001)
     name = Column(String)  # Ürün adı
     description = Column(String, nullable=True)  # Açıklama
+    
+    # Molds'tan taşınan alanlar (Excel kolonları)
+    cavity_count = Column(Integer, nullable=True)  # Göz Adedi
+    cycle_time_sec = Column(Integer, nullable=True)  # Çevrim Süresi (sn)
+    injection_temp_c = Column(Integer, nullable=True)  # Enj. Sıcaklığı (°C)
+    mold_temp_c = Column(Integer, nullable=True)  # Kalıp Sıcaklığı (°C)
+    material = Column(String, nullable=True)  # Malzeme
+    part_weight_g = Column(Integer, nullable=True)  # Parça Ağırlığı (g)
+    hourly_production = Column(Integer, nullable=True)  # Saatlik Üretim (adet)
+    
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft delete: Silinme tarihi (NULL = aktif)
@@ -107,19 +118,13 @@ class Mold(Base):
     __tablename__ = "molds"
     id = Column(Integer, primary_key=True)
     code = Column(String, unique=True, index=True)  # Kalıp kodu (örn: MOLD-001)
-    name = Column(String)  # Kalıp adı (Excel: "Kalıp Adı")
+    name = Column(String)  # Kalıp adı (sadece kalıp ismi)
     description = Column(String, nullable=True)  # Açıklama
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)  # Hangi ürün için kullanılıyor (Excel: "Ürün Tipi")
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)  # Hangi ürün için kullanılıyor
     status = Column(String, default="active")  # active / maintenance / inactive
     
-    # Excel kolonları
-    cavity_count = Column(Integer, nullable=True)  # Göz Adedi
-    cycle_time_sec = Column(Integer, nullable=True)  # Çevrim Süresi (sn)
-    injection_temp_c = Column(Integer, nullable=True)  # Enj. Sıcaklığı (°C)
-    mold_temp_c = Column(Integer, nullable=True)  # Kalıp Sıcaklığı (°C)
-    material = Column(String, nullable=True)  # Malzeme
-    part_weight_g = Column(Integer, nullable=True)  # Parça Ağırlığı (g)
-    hourly_production = Column(Integer, nullable=True)  # Saatlik Üretim (adet)
+    # Excel kolonları kaldırıldı - artık products tablosunda
+    # Verileri products tablosundan almak için product_id kullanılacak
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=True)

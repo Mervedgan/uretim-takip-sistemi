@@ -61,6 +61,7 @@ def create_work_order(
             planned_start=planned_start,
             planned_end=planned_end,
             created_by=current_user["user_id"],  # Work order'ı oluşturan kullanıcının ID'si
+            machine_id=wo_data.machine_id,  # Üretim için seçilen makine ID'si
         )
 
         db.add(wo)
@@ -80,7 +81,10 @@ def create_work_order(
         
         # Aşama isimleri oluştur
         stage_names = []
-        if num_stages == 1:
+        if wo_data.stage_names and len(wo_data.stage_names) == num_stages:
+            # Kullanıcı aşama isimleri girdiyse onları kullan
+            stage_names = wo_data.stage_names
+        elif num_stages == 1:
             stage_names = ["Üretim"]
         elif num_stages == 2:
             stage_names = ["Enjeksiyon", "Montaj"]

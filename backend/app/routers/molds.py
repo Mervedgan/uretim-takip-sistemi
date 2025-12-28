@@ -90,14 +90,7 @@ def create_mold(
         description=mold_data.description,
         product_id=mold_data.product_id,
         status=mold_data.status or "active",
-        # Excel kolonları
-        cavity_count=mold_data.cavity_count,
-        cycle_time_sec=mold_data.cycle_time_sec,
-        injection_temp_c=mold_data.injection_temp_c,
-        mold_temp_c=mold_data.mold_temp_c,
-        material=mold_data.material,
-        part_weight_g=mold_data.part_weight_g,
-        hourly_production=mold_data.hourly_production,
+        # Excel kolonları kaldırıldı - artık products tablosunda
     )
     
     db.add(mold)
@@ -149,21 +142,7 @@ def update_mold(
     if mold_data.status is not None:
         mold.status = mold_data.status
     
-    # Excel kolonlarını güncelle
-    if mold_data.cavity_count is not None:
-        mold.cavity_count = mold_data.cavity_count
-    if mold_data.cycle_time_sec is not None:
-        mold.cycle_time_sec = mold_data.cycle_time_sec
-    if mold_data.injection_temp_c is not None:
-        mold.injection_temp_c = mold_data.injection_temp_c
-    if mold_data.mold_temp_c is not None:
-        mold.mold_temp_c = mold_data.mold_temp_c
-    if mold_data.material is not None:
-        mold.material = mold_data.material
-    if mold_data.part_weight_g is not None:
-        mold.part_weight_g = mold_data.part_weight_g
-    if mold_data.hourly_production is not None:
-        mold.hourly_production = mold_data.hourly_production
+    # Excel kolonları kaldırıldı - artık products tablosunda
     
     mold.updated_at = datetime.now(timezone.utc)
     
