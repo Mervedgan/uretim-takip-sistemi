@@ -12,6 +12,7 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { User } from '../types';
 import { productsAPI, moldsAPI, workOrdersAPI } from '../utils/api';
@@ -55,6 +56,7 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedProducts, setExpandedProducts] = useState<Set<number>>(new Set());
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const loadProducts = async () => {
     try {
@@ -155,14 +157,44 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
           </Text>
         </View>
 
-        {loading && products.length === 0 ? (
-          <ActivityIndicator size="large" color="#3498db" style={{ marginVertical: 40 }} />
-        ) : products.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>Ürün bulunmamaktadır.</Text>
-          </View>
-        ) : (
-          products.map((product) => {
+        {/* Arama Çubuğu */}
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Ürün adı veya kodu ile ara..."
+            placeholderTextColor="#95a5a6"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        {(() => {
+          // Arama sorgusuna göre filtrele
+          const filteredProducts = searchQuery.trim() === '' 
+            ? products 
+            : products.filter(product => {
+                const query = searchQuery.toLowerCase().trim();
+                const productName = (product.name || '').toLowerCase();
+                const productCode = (product.code || '').toLowerCase();
+                
+                return (
+                  productName.includes(query) ||
+                  productCode.includes(query)
+                );
+              });
+
+          return loading && products.length === 0 ? (
+            <ActivityIndicator size="large" color="#3498db" style={{ marginVertical: 40 }} />
+          ) : filteredProducts.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>
+                {searchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Ürün bulunmamaktadır.'}
+              </Text>
+            </View>
+          ) : (
+            filteredProducts.map((product) => {
             const mold = product.mold;
             // Excel kolonları artık product'ta
             const cycleTime = product.cycle_time_sec || 0;
@@ -211,7 +243,7 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
                       </View>
                       <View style={styles.metricBox}>
                         <Text style={styles.metricIcon}>📊</Text>
-                        <Text style={styles.metricLabel}>Mevcut Üretim</Text>
+                        <Text style={styles.metricLabel}>Mevcut Ürün</Text>
                         <Text style={styles.metricValue}>{product.producedQty} adet</Text>
                       </View>
                     </View>
@@ -240,7 +272,8 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
               </View>
             );
           })
-        )}
+          );
+        })()}
       </ScrollView>
     </View>
   );
@@ -420,6 +453,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#7f8c8d',
     textAlign: 'center',
+  },
+  searchContainer: {
+    marginHorizontal: 20,
+    marginBottom: 15,
+    marginTop: 10,
+  },
+  searchInput: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#2c3e50',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
 });
 

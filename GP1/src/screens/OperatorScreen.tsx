@@ -95,6 +95,8 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
   const [showWorkOrderStages, setShowWorkOrderStages] = useState<boolean>(false);
   const [showMachines, setShowMachines] = useState<boolean>(false);
   const [showMachineReadings, setShowMachineReadings] = useState<boolean>(false);
+  const [showProductsList, setShowProductsList] = useState<boolean>(false);
+  const [productSearchQuery, setProductSearchQuery] = useState<string>('');
   
   // Mold state
   const [molds, setMolds] = useState<any[]>([]);
@@ -598,6 +600,33 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
     }
   };
 
+  // Makine status'leri için ayrı fonksiyonlar
+  const getMachineStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':
+        return '#27ae60'; // Yeşil - çalışıyor
+      case 'maintenance':
+        return '#f39c12'; // Turuncu - bakımda
+      case 'inactive':
+        return '#e74c3c'; // Kırmızı - çalışmıyor
+      default:
+        return '#95a5a6'; // Gri - bilinmeyen
+    }
+  };
+
+  const getMachineStatusText = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'Aktif';
+      case 'maintenance':
+        return 'Bakım';
+      case 'inactive':
+        return 'Çalışmıyor';
+      default:
+        return 'Çalışmıyor';
+    }
+  };
+
   const renderDashboard = () => {
     // Aktif iş emirleri: Sadece bitiş tarihi geçmemiş olanları göster
     // Başlatılmış/bitmemiş/tamamlanmış fark etmez, sadece tarih kontrolü yap
@@ -834,10 +863,10 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                   <View
                     style={[
                       styles.statusBadge,
-                      { backgroundColor: getStatusColor(machine.status) }
+                      { backgroundColor: getMachineStatusColor(machine.status) }
                     ]}
                   >
-                    <Text style={styles.statusText}>{machine.status}</Text>
+                    <Text style={styles.statusText}>{getMachineStatusText(machine.status)}</Text>
                   </View>
                 </View>
                 <Text style={styles.machineDetail}>Tip: {machine.machine_type}</Text>
@@ -910,28 +939,81 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
             <Text style={styles.hintText}>
               Database'de kayıtlı ürün kodunu girin
             </Text>
-            {products.length > 0 && (
-              <View style={styles.productsList}>
-                <Text style={styles.productsListTitle}>Mevcut Ürünler:</Text>
-                {products.slice(0, 5).map((product) => (
+            
+            {/* Mevcut Ürünler - Açılır Liste */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Mevcut Ürünler</Text>
+              <View style={styles.productsListContainer}>
+                {/* Arama Çubuğu - Açılır/Kapanır */}
+                <View style={styles.productSearchContainer}>
+                  <TextInput
+                    style={styles.productSearchInput}
+                    placeholder="Ürün adı veya kodu ile ara..."
+                    placeholderTextColor="#95a5a6"
+                    value={productSearchQuery}
+                    onChangeText={setProductSearchQuery}
+                    onFocus={() => setShowProductsList(true)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
                   <TouchableOpacity
-                    key={product.id}
-                    style={styles.productItem}
-                    onPress={async () => {
-                      setProductCode(product.code);
-                      setProductName(product.name);
-                      setProductId(product.id);
-                      // Ürüne ait mold'ları yükle
-                      await loadMoldsForProduct(product.id);
-                    }}
+                    style={styles.productSearchIcon}
+                    onPress={() => setShowProductsList(!showProductsList)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.productItemText}>
-                      {product.code} - {product.name}
+                    <Text style={styles.expandIcon}>
+                      {showProductsList ? '▼' : '▶'}
                     </Text>
                   </TouchableOpacity>
-                ))}
+                </View>
+              
+              {showProductsList && (
+                <>
+                  
+                  <ScrollView style={styles.productsListScroll} nestedScrollEnabled={true}>
+                    {(() => {
+                      // Arama sorgusuna göre filtrele
+                      const filteredProducts = productSearchQuery.trim() === '' 
+                        ? products 
+                        : products.filter(product => 
+                            product.code.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                            product.name.toLowerCase().includes(productSearchQuery.toLowerCase())
+                          );
+                      
+                      if (filteredProducts.length === 0) {
+                        return (
+                          <Text style={styles.hintText}>
+                            {productSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Ürün bulunamadı. Lütfen backend\'den ürün ekleyin.'}
+                          </Text>
+                        );
+                      }
+                      
+                      return filteredProducts.map((product) => (
+                        <TouchableOpacity
+                          key={product.id}
+                          style={styles.productItem}
+                          onPress={async () => {
+                            setProductCode(product.code);
+                            setProductName(product.name);
+                            setProductId(product.id);
+                            // Ürüne ait mold'ları yükle
+                            await loadMoldsForProduct(product.id);
+                            // Arama sorgusunu temizle ve listeyi kapat
+                            setProductSearchQuery('');
+                            setShowProductsList(false);
+                          }}
+                        >
+                          <Text style={styles.productItemText}>
+                            {product.code} - {product.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ));
+                    })()}
+                  </ScrollView>
+                </>
+              )}
               </View>
-            )}
+            </View>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1486,17 +1568,40 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontStyle: 'italic',
   },
-  productsList: {
+  productsListContainer: {
     marginTop: 10,
-    padding: 10,
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
-  productsListTitle: {
-    fontSize: 12,
-    fontWeight: '600',
+  productSearchContainer: {
+    padding: 10,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  productSearchInput: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 10,
+    paddingRight: 40,
+    fontSize: 14,
     color: '#2c3e50',
-    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  productSearchIcon: {
+    position: 'absolute',
+    right: 20,
+    padding: 10,
+  },
+  productsListScroll: {
+    maxHeight: 200,
+    paddingHorizontal: 10,
+    paddingBottom: 10,
   },
   productItem: {
     padding: 8,

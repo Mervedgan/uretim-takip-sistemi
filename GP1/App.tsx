@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { StatusBar, useColorScheme, ActivityIndicator, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from './src/screens/LoginScreen';
 import SignupScreen from './src/screens/SignupScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -137,14 +138,16 @@ function App() {
   // Show loading screen while checking authentication
   if (isCheckingAuth) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
-        <ActivityIndicator size="large" color="#3498db" />
-      </View>
+      <SafeAreaProvider>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
+          <ActivityIndicator size="large" color="#3498db" />
+        </View>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       <StatusBar 
         barStyle={isDarkMode ? 'light-content' : 'dark-content'} 
         backgroundColor="#3498db"
@@ -177,7 +180,7 @@ function App() {
       ) : (
         renderRoleSpecificScreen()
       )}
-    </>
+    </SafeAreaProvider>
   );
 }
 

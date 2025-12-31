@@ -12,6 +12,9 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  Alert,
+  TextInput,
+  Modal,
 } from 'react-native';
 import { User } from '../types';
 import { moldsAPI } from '../utils/api';
@@ -37,6 +40,16 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
   const [molds, setMolds] = useState<Mold[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [moldCode, setMoldCode] = useState('');
+  const [productId, setProductId] = useState('');
+  const [addingMold, setAddingMold] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [moldNameToDelete, setMoldNameToDelete] = useState('');
+  const [deletingMold, setDeletingMold] = useState(false);
+
+  // Sadece planner ve admin kalıp ekleyebilir
+  const canAddMold = user.role === 'planner' || user.role === 'admin';
 
   const loadMolds = async () => {
     try {
@@ -72,31 +85,105 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
     });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return '#27ae60';
-      case 'maintenance':
-        return '#f39c12';
-      case 'inactive':
-        return '#95a5a6';
-      default:
-        return '#3498db';
+  const handleAddMold = () => {
+    setMoldCode('');
+    setProductId('');
+    setShowAddModal(true);
+  };
+
+  const handleSaveMold = async () => {
+    if (!moldCode.trim()) {
+      Alert.alert('Hata', 'Lütfen kalıp kodu girin!');
+      return;
+    }
+
+    if (!productId.trim()) {
+      Alert.alert('Hata', 'Lütfen ürün ID girin!');
+      return;
+    }
+
+    const parsedProductId = parseInt(productId, 10);
+    if (isNaN(parsedProductId) || parsedProductId <= 0) {
+      Alert.alert('Hata', 'Geçerli bir ürün ID girin!');
+      return;
+    }
+
+    try {
+      setAddingMold(true);
+      await moldsAPI.createMold({
+        code: moldCode.trim(),
+        name: moldCode.trim(), // Kalıp kodu aynı zamanda isim olarak kullanılacak
+        product_id: parsedProductId,
+        status: 'active',
+      });
+      
+      Alert.alert('Başarılı', 'Kalıp başarıyla eklendi!');
+      setShowAddModal(false);
+      setMoldCode('');
+      setProductId('');
+      await loadMolds(); // Listeyi yenile
+    } catch (error: any) {
+      console.error('Error adding mold:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Kalıp eklenirken bir hata oluştu!';
+      Alert.alert('Hata', errorMessage);
+    } finally {
+      setAddingMold(false);
     }
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'Aktif';
-      case 'maintenance':
-        return 'Bakım';
-      case 'inactive':
-        return 'Pasif';
-      default:
-        return status;
-    }
+  const handleDeleteMold = () => {
+    setMoldNameToDelete('');
+    setShowDeleteModal(true);
   };
+
+  const handleConfirmDelete = async () => {
+    if (!moldNameToDelete.trim()) {
+      Alert.alert('Hata', 'Lütfen kalıp adı girin!');
+      return;
+    }
+
+    // Kalıp adına göre kalıbı bul
+    const moldToDelete = molds.find(m => 
+      m.name.toLowerCase() === moldNameToDelete.trim().toLowerCase() ||
+      m.code.toLowerCase() === moldNameToDelete.trim().toLowerCase()
+    );
+
+    if (!moldToDelete) {
+      Alert.alert('Hata', 'Bu isimde bir kalıp bulunamadı!');
+      return;
+    }
+
+    Alert.alert(
+      'Kalıp Sil',
+      `"${moldToDelete.code}" (${moldToDelete.name}) kalıbı silinecek. Emin misiniz?`,
+      [
+        {
+          text: 'İptal',
+          style: 'cancel',
+        },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeletingMold(true);
+              await moldsAPI.deleteMold(moldToDelete.id);
+              Alert.alert('Başarılı', 'Kalıp başarıyla silindi!');
+              setShowDeleteModal(false);
+              setMoldNameToDelete('');
+              await loadMolds(); // Listeyi yenile
+            } catch (error: any) {
+              console.error('Error deleting mold:', error);
+              Alert.alert('Hata', error.message || 'Kalıp silinirken bir hata oluştu!');
+            } finally {
+              setDeletingMold(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
 
   return (
     <View style={styles.container}>
@@ -116,10 +203,27 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
         }
       >
         <View style={styles.userInfo}>
-          <Text style={styles.welcomeText}>Kalıp Listesi</Text>
-          <Text style={styles.infoText}>
-            Production_db'deki tüm aktif kalıplar
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.welcomeText}>Kalıp Listesi</Text>
+            {canAddMold && (
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={handleAddMold}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.addButtonText}>+ Kalıp Ekle</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={handleDeleteMold}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.deleteButtonText}>🗑️ Kalıp Sil</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         </View>
 
         {loading && molds.length === 0 ? (
@@ -133,24 +237,12 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
             <View key={mold.id} style={styles.moldCard}>
               <View style={styles.moldHeader}>
                 <Text style={styles.moldCode}>{mold.code}</Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: getStatusColor(mold.status) },
-                  ]}
-                >
-                  <Text style={styles.statusText}>{getStatusText(mold.status)}</Text>
-                </View>
+                {mold.product_id && (
+                  <Text style={styles.moldProduct}>
+                    Ürün ID: {mold.product_id}
+                  </Text>
+                )}
               </View>
-              <Text style={styles.moldName}>{mold.name}</Text>
-              {mold.description && (
-                <Text style={styles.moldDescription}>{mold.description}</Text>
-              )}
-              {mold.product_id && (
-                <Text style={styles.moldProduct}>
-                  Ürün ID: {mold.product_id}
-                </Text>
-              )}
               <View style={styles.moldFooter}>
                 <Text style={styles.moldDate}>
                   Oluşturulma: {formatDate(mold.created_at)}
@@ -165,6 +257,113 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
           ))
         )}
       </ScrollView>
+
+      {/* Kalıp Ekleme Modal */}
+      <Modal
+        visible={showAddModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowAddModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Yeni Kalıp Ekle</Text>
+            
+            <Text style={styles.modalLabel}>Kalıp Kodu *</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: KP-01"
+              placeholderTextColor="#95a5a6"
+              value={moldCode}
+              onChangeText={setMoldCode}
+              autoCapitalize="characters"
+            />
+
+            <Text style={styles.modalLabel}>Ürün ID *</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: 1"
+              placeholderTextColor="#95a5a6"
+              value={productId}
+              onChangeText={setProductId}
+              keyboardType="numeric"
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowAddModal(false);
+                  setMoldCode('');
+                  setProductId('');
+                }}
+                disabled={addingMold}
+              >
+                <Text style={styles.modalButtonCancelText}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSave]}
+                onPress={handleSaveMold}
+                disabled={addingMold}
+              >
+                {addingMold ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.modalButtonSaveText}>Kaydet</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Kalıp Silme Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Kalıp Sil</Text>
+            
+            <Text style={styles.modalLabel}>Kalıp Adı veya Kodu *</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: KP-01"
+              placeholderTextColor="#95a5a6"
+              value={moldNameToDelete}
+              onChangeText={setMoldNameToDelete}
+              autoCapitalize="characters"
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowDeleteModal(false);
+                  setMoldNameToDelete('');
+                }}
+                disabled={deletingMold}
+              >
+                <Text style={styles.modalButtonCancelText}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonDelete]}
+                onPress={handleConfirmDelete}
+                disabled={deletingMold}
+              >
+                {deletingMold ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.modalButtonDeleteText}>Sil</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -205,11 +404,42 @@ const styles = StyleSheet.create({
   userInfo: {
     marginBottom: 20,
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
   welcomeText: {
     fontSize: 20,
     fontWeight: '600',
     color: '#2c3e50',
-    marginBottom: 5,
+  },
+  buttonContainer: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  addButton: {
+    backgroundColor: '#3498db',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    backgroundColor: '#e74c3c',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  deleteButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
   infoText: {
     fontSize: 14,
@@ -237,32 +467,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#3498db',
   },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  statusText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  moldName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 8,
-  },
-  moldDescription: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 8,
-    lineHeight: 20,
-  },
   moldProduct: {
     fontSize: 14,
     color: '#3498db',
-    marginBottom: 10,
     fontWeight: '600',
   },
   moldFooter: {
@@ -291,6 +498,80 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#7f8c8d',
     textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    width: '85%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+    marginTop: 10,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#bdc3c7',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+    backgroundColor: '#f8f9fa',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#ecf0f1',
+    marginRight: 10,
+  },
+  modalButtonCancelText: {
+    color: '#7f8c8d',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonSave: {
+    backgroundColor: '#3498db',
+    marginLeft: 10,
+  },
+  modalButtonSaveText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonDelete: {
+    backgroundColor: '#e74c3c',
+    marginLeft: 10,
+  },
+  modalButtonDeleteText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

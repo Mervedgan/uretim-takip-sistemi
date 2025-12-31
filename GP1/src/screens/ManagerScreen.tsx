@@ -32,6 +32,7 @@ interface WorkOrder {
   planned_end: string;
   created_by?: number | null;
   created_by_username?: string;
+  machine_id: number | null;
 }
 
 interface WorkOrderStage {
@@ -70,6 +71,7 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
   const [activeProductions, setActiveProductions] = useState<ProductionRecord[]>([]);
   const [productionAnalysis, setProductionAnalysis] = useState<ProductionAnalysis | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [backendMachines, setBackendMachines] = useState<BackendMachine[]>([]);
   const [loading, setLoading] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
@@ -133,6 +135,7 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
       const machinesResponse = await machinesAPI.getMachines();
       const machinesData = machinesResponse.data || machinesResponse;
       const allMachines = Array.isArray(machinesData) ? machinesData : [];
+      setBackendMachines(allMachines);
 
       // Aktif work orders'ları ProductionRecord formatına dönüştür
       const activeWOs = allWorkOrders.filter(wo => {
@@ -628,46 +631,50 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
             
             {showIssues && (
               <>
-                {issues.map((issue) => {
+                {issues.map((issue, index) => {
               // Issue'un hangi work order ve stage'e ait olduğunu bul
               let workOrderId: number | null = null;
-              let stageName = 'Bilinmeyen Aşama';
               let productCode = 'Bilinmeyen Ürün';
+              let machineId: number | null = null;
               
               for (const [woId, stages] of workOrderStages.entries()) {
                 const stage = stages.find(s => s.id === issue.work_order_stage_id);
                 if (stage) {
                   workOrderId = woId;
-                  stageName = stage.stage_name;
                   // Work order'ı bul
                   const workOrder = workOrders.find(wo => wo.id === woId);
                   if (workOrder) {
                     productCode = workOrder.product_code;
+                    machineId = workOrder.machine_id;
                   }
                   break;
                 }
               }
 
-              const issueDate = new Date(issue.created_at);
-              const statusText = issue.status === 'open' ? 'Açık' : 
-                                issue.status === 'acknowledged' ? 'Kabul Edildi' : 
-                                'Çözüldü';
-              const statusColor = issue.status === 'open' ? '#e74c3c' : 
-                                 issue.status === 'acknowledged' ? '#f39c12' : 
-                                 '#27ae60';
+              // Makine bilgisini bul
+              let machineName = '';
+              if (machineId) {
+                const machine = backendMachines.find(m => m.id === machineId);
+                if (machine) {
+                  machineName = machine.name;
+                }
+              }
+              
+              // Eğer makine bilgisi yoksa, sırayla makine ismi ata
+              if (!machineName) {
+                const machineNumber = (index + 1).toString().padStart(2, '0');
+                machineName = `makine${machineNumber}`;
+              }
 
               return (
                 <View key={issue.id} style={styles.issueCard}>
                   <View style={styles.issueHeader}>
-                    <Text style={styles.issueTitle}>İş Emri #{workOrderId || 'N/A'} - {stageName}</Text>
-                    <View style={[styles.issueStatusBadge, { backgroundColor: statusColor }]}>
-                      <Text style={styles.issueStatusText}>{statusText}</Text>
-                    </View>
+                    <Text style={styles.issueTitle}>{machineName}</Text>
                   </View>
                   <Text style={styles.issueProductCode}>Ürün: {productCode}</Text>
                   <Text style={styles.issueDescription}>{issue.description || 'Açıklama yok'}</Text>
                   <Text style={styles.issueTime}>
-                    Bildirilme: {formatDateTime(issueDate)}
+                    Bildirilme: {formatDateTime(new Date(issue.created_at))}
                   </Text>
                   {issue.type && (
                     <Text style={styles.issueType}>Tip: {issue.type}</Text>
