@@ -22,16 +22,21 @@ def upgrade() -> None:
         sa.Column('machine_id', sa.Integer(), nullable=True)
     )
     # Foreign key constraint ekle
-    op.create_foreign_key(
-        'fk_work_orders_machine_id',
-        'work_orders', 'machines',
-        ['machine_id'], ['id']
-    )
+    # SQLite doesn't support ALTER TABLE ADD CONSTRAINT
+    bind = op.get_bind()
+    if bind.dialect.name != 'sqlite':
+        op.create_foreign_key(
+            'fk_work_orders_machine_id',
+            'work_orders', 'machines',
+            ['machine_id'], ['id']
+        )
 
 
 def downgrade() -> None:
     # Foreign key constraint'i kaldır
-    op.drop_constraint('fk_work_orders_machine_id', 'work_orders', type_='foreignkey')
+    bind = op.get_bind()
+    if bind.dialect.name != 'sqlite':
+        op.drop_constraint('fk_work_orders_machine_id', 'work_orders', type_='foreignkey')
     # machine_id kolonunu kaldır
     op.drop_column('work_orders', 'machine_id')
 

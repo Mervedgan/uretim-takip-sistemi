@@ -67,37 +67,49 @@ def create_mold(
     
     **Yetki:** "planner" veya "admin" rolü
     """
-    # Aynı kod ile aktif kalıp var mı kontrol et (soft delete kontrolü)
-    existing = db.query(Mold).filter(
-        Mold.code == mold_data.code,
-        Mold.deleted_at.is_(None)  # Sadece aktif olanları kontrol et
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Bu kalıp kodu zaten kayıtlı.")
-    
-    # Product ID varsa kontrol et (aktif ürün olmalı)
-    if mold_data.product_id:
-        product = db.query(Product).filter(
-            Product.id == mold_data.product_id,
-            Product.deleted_at.is_(None)  # Sadece aktif ürünler
+    try:
+        # Aynı kod ile aktif kalıp var mı kontrol et (soft delete kontrolü)
+        existing = db.query(Mold).filter(
+            Mold.code == mold_data.code,
+            Mold.deleted_at.is_(None)  # Sadece aktif olanları kontrol et
         ).first()
-        if not product:
-            raise HTTPException(status_code=404, detail="Belirtilen ürün bulunamadı veya silinmiş.")
-    
-    mold = Mold(
-        code=mold_data.code,
-        name=mold_data.name,
-        description=mold_data.description,
-        product_id=mold_data.product_id,
-        status=mold_data.status or "active",
-        # Excel kolonları kaldırıldı - artık products tablosunda
-    )
-    
-    db.add(mold)
-    db.commit()
-    db.refresh(mold)
-    
-    return mold
+        if existing:
+            raise HTTPException(status_code=400, detail="Bu kalıp kodu zaten kayıtlı.")
+        
+        # Product ID varsa kontrol et (aktif ürün olmalı)
+        if mold_data.product_id and mold_data.product_id > 0:
+            product = db.query(Product).filter(
+                Product.id == mold_data.product_id,
+                Product.deleted_at.is_(None)  # Sadece aktif ürünler
+            ).first()
+            if not product:
+                raise HTTPException(status_code=404, detail="Belirtilen ürün bulunamadı veya silinmiş.")
+        
+        mold = Mold(
+            code=mold_data.code,
+            name=mold_data.name,
+            description=mold_data.description,
+            product_id=mold_data.product_id if (mold_data.product_id and mold_data.product_id > 0) else None,
+            status=mold_data.status or "active",
+            # Excel kolonları kaldırıldı - artık products tablosunda
+        )
+        
+        db.add(mold)
+        db.commit()
+        db.refresh(mold)
+        
+        return mold
+    except HTTPException:
+        # HTTPException'ları tekrar fırlat (zaten doğru formatlanmış)
+        raise
+    except Exception as e:
+        # Diğer hataları yakala ve 500 hatası olarak döndür
+        db.rollback()
+        print(f"Error creating mold: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Kalıp oluşturulurken bir hata oluştu: {str(e)}"
+        )
 
 
 # ---------------------------------------------------------
@@ -153,13 +165,13 @@ def update_mold(
 
 
 # ---------------------------------------------------------
-# ✅ Kalıp Sil (Soft Delete): Sadece admin
+# ✅ Kalıp Sil (Soft Delete): planner veya admin
 # ---------------------------------------------------------
 @router.delete("/{mold_id}")
 def delete_mold(
     mold_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_roles("admin"))  # ✅ Sadece admin
+    current_user: dict = Depends(require_roles("planner", "admin"))  # ✅ planner + admin
 ):
     """
     Kalıbı soft delete yapar (deleted_at set eder, veri korunur).
@@ -170,7 +182,7 @@ def delete_mold(
     - Geri getirilebilir (restore endpoint'i ile)
     - Ürün ilişkisi korunur (product_id değişmez)
     
-    **Yetki:** "admin" rolü
+    **Yetki:** "planner" veya "admin" rolü
     """
     mold = db.query(Mold).filter(
         Mold.id == mold_id,

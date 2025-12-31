@@ -11,7 +11,7 @@ router = APIRouter(prefix="/issues", tags=["Issues"])
 
 
 # ---------------------------------------------------------
-# ✅ List Issues (Manager/Admin)
+# ✅ List Issues (Manager/Admin/Worker)
 # ---------------------------------------------------------
 @router.get("/")
 def list_issues(
@@ -19,12 +19,12 @@ def list_issues(
     issue_type: Optional[str] = Query(None, alias="type", description="Filter by issue type"),
     work_order_stage_id: Optional[int] = Query(None, description="Filter by work order stage ID"),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_roles("admin", "planner"))  # Manager/Admin
+    current_user: dict = Depends(require_roles("admin", "planner", "worker"))  # ✅ admin + planner + worker
 ):
     """
     Tüm issue'ları listeler (filtreleme ile).
     
-    **Yetki:** "admin" veya "planner" rolü
+    **Yetki:** "admin", "planner" veya "worker" rolü
     """
     query = db.query(Issue)
     

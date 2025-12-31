@@ -168,6 +168,7 @@ def list_work_orders(
             "planned_start": wo.planned_start.isoformat() if wo.planned_start else None,
             "planned_end": wo.planned_end.isoformat() if wo.planned_end else None,
             "created_by": wo.created_by,
+            "machine_id": wo.machine_id,  # Üretim için seçilen makine ID'si
         }
         # created_by kullanıcısının username'ini ekle
         if wo.created_by:
