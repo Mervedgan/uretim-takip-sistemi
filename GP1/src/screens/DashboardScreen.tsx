@@ -38,6 +38,7 @@ interface WorkOrder {
   produced_qty?: number;  // Mevcut üretilen ürün sayısı
   planned_start: string;
   planned_end: string;
+  machine_id?: number;  // Üretim için seçilen makine ID'si
 }
 
 interface WorkOrderStage {
@@ -76,13 +77,12 @@ interface Product {
   description?: string;
 }
 
-interface Mold {
+interface Product {
   id: number;
   code: string;
   name: string;
   description?: string;
-  product_id?: number;
-  status: string;
+  // Molds'tan taşınan Excel kolonları
   cavity_count?: number;
   cycle_time_sec?: number;
   injection_temp_c?: number;
@@ -90,6 +90,16 @@ interface Mold {
   material?: string;
   part_weight_g?: number;
   hourly_production?: number;
+}
+
+interface Mold {
+  id: number;
+  code: string;
+  name: string;
+  description?: string;
+  product_id?: number;
+  status: string;
+  // Excel kolonları kaldırıldı - artık Product interface'inde
 }
 
 const DashboardScreen: React.FC<DashboardScreenProps> = ({ 
@@ -107,6 +117,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [selectedProductionId, setSelectedProductionId] = useState<string | null>(null);
   const [issueDescription, setIssueDescription] = useState('');
+  
+  // Dashboard accordion states
+  const [showActiveProductions, setShowActiveProductions] = useState<boolean>(true); // Varsayılan açık
+  const [productionSearchQuery, setProductionSearchQuery] = useState<string>(''); // Arama sorgusu
+  const [showMachineStatus, setShowMachineStatus] = useState<boolean>(false);
   
   // activeProductions değiştiğinde ref'i güncelle
   useEffect(() => {
@@ -275,10 +290,21 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         // Production ID'yi bir kez hesapla (deterministik makine seçimi için kullanılacak)
         const productionId = mold ? `WO-${wo.id}-PRODUCT-${product.id}-MOLD-${mold.id}` : `WO-${wo.id}-PRODUCT-${product.id}`;
         
-        // Deterministik makine seçimi: Production ID'ye göre (her zaman aynı production aynı makineye atanır)
-        const machineHash = productionId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        const machineIndex = machineHash % (allMachines.length || 1);
-        const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
+        // Makine seçimi: Önce work order'dan machine_id'yi al, yoksa work order ID'sine göre seç
+        let machine;
+        if (wo.machine_id && wo.machine_id > 0) {
+          // Work order'da machine_id varsa onu kullan
+          machine = allMachines.find(m => m.id === wo.machine_id);
+          if (!machine && allMachines.length > 0) {
+            // Makine bulunamazsa ilk makineyi kullan
+            machine = allMachines[0];
+          }
+        } else {
+          // Eski yöntem: Work order ID'sine göre deterministik seçim (geriye dönük uyumluluk için)
+          // Work order ID'sini kullan (her work order farklı makine alır)
+          const machineIndex = (wo.id - 1) % (allMachines.length || 1);
+          machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
+        }
 
         // Mevcut production'ı bul (eğer varsa) - ref'ten al (güncel değer)
         const existingProduction = activeProductionsRef.current.find(p => p.id === productionId);
@@ -297,7 +323,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         if (existingProduction) {
           const statusChanged = existingProduction.status !== calculatedStatus;
           const targetCountChanged = existingProduction.targetCount !== wo.qty;
-          const cycleTimeChanged = existingProduction.cycleTime !== (mold?.cycle_time_sec || 3);
+          const cycleTimeChanged = existingProduction.cycleTime !== (product?.cycle_time_sec || 3);
           const productNameChanged = existingProduction.productName !== (product.name || wo.product_code);
           
           // Kritik alanlar değişmediyse, mevcut production'ı kullan (aynı referans)
@@ -333,7 +359,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             return wo.produced_qty || 0;
           })(),
           targetCount: wo.qty,  // Database'den gelen hedef ürün sayısı
-          cycleTime: mold?.cycle_time_sec || 3,
+          cycleTime: product?.cycle_time_sec || 3,
           status: (() => {
             // Eğer mevcut production aktifse ve backend'den gelen status paused veya completed değilse, aktif kal
             if (existingProduction?.status === 'active' && calculatedStatus === 'active') {
@@ -352,23 +378,26 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             startTime: s.actual_start ? new Date(s.actual_start) : undefined,
             endTime: s.actual_end ? new Date(s.actual_end) : undefined,
           })),
-          // Mold bilgilerini ekle (database'den) - eğer varsa
+          // Mold bilgilerini ekle (database'den) - sadece temel bilgiler (Excel kolonları kaldırıldı)
           moldData: mold ? {
             id: mold.id,
             name: mold.name,
             code: mold.code,
-            cycle_time_sec: mold.cycle_time_sec,
-            hourly_production: mold.hourly_production,
-            injection_temp_c: mold.injection_temp_c,
-            mold_temp_c: mold.mold_temp_c,
-            material: mold.material,
-            part_weight_g: mold.part_weight_g,
+            // Excel kolonları kaldırıldı - artık productData'da
           } : undefined,
-          // Product bilgilerini de ekle
+          // Product bilgilerini ekle (Excel kolonları burada)
           productData: {
             id: product.id,
             code: product.code,
             name: product.name,
+            // Molds'tan taşınan Excel kolonları
+            cavity_count: product.cavity_count,
+            cycle_time_sec: product.cycle_time_sec,
+            injection_temp_c: product.injection_temp_c,
+            mold_temp_c: product.mold_temp_c,
+            material: product.material,
+            part_weight_g: product.part_weight_g,
+            hourly_production: product.hourly_production,
           },
           // Issue bilgilerini ekle (eğer paused stage varsa)
           issue: issueDescription,
@@ -860,8 +889,33 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
         {/* Aktif Üretimler - Makine Kartları - Aktif ve hedefe ulaşmamış duraklatılmış üretimler */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Aktif Üretimler</Text>
-          {(() => {
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowActiveProductions(!showActiveProductions)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sectionTitle}>Aktif Üretimler</Text>
+            <Text style={styles.expandIcon}>
+              {showActiveProductions ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showActiveProductions && (
+            <>
+              {/* Arama Çubuğu */}
+              <View style={styles.searchContainer}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Ürün adı, makine kodu veya lot no ile ara..."
+                  placeholderTextColor="#95a5a6"
+                  value={productionSearchQuery}
+                  onChangeText={setProductionSearchQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {(() => {
             // Aktif üretimleri ve hedef ürün sayısına ulaşmamış duraklatılmış üretimleri filtrele
             const activeAndPausedProductions = activeProductions.filter(p => {
               if (p.status === 'active') return true;
@@ -871,29 +925,47 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
               }
               return false; // completed status'leri gösterme
             });
+            
+            // Arama sorgusuna göre filtrele
+            const filteredProductions = productionSearchQuery.trim() === '' 
+              ? activeAndPausedProductions 
+              : activeAndPausedProductions.filter(production => {
+                  const query = productionSearchQuery.toLowerCase().trim();
+                  const productName = (production.productName || '').toLowerCase();
+                  const machineId = production.machineId.toLowerCase();
+                  
+                  return (
+                    productName.includes(query) ||
+                    machineId.includes(query)
+                  );
+                });
           
             return loading && activeProductions.length === 0 ? (
               <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
-            ) : activeAndPausedProductions.length === 0 ? (
-              <Text style={styles.emptyText}>Aktif üretim bulunmamaktadır.</Text>
+            ) : filteredProductions.length === 0 ? (
+              <Text style={styles.emptyText}>
+                {productionSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Aktif üretim bulunmamaktadır.'}
+              </Text>
             ) : (
-              activeAndPausedProductions.map((production: ProductionRecord) => {
+              filteredProductions.map((production: ProductionRecord) => {
             const machine = backendMachines.find(m => m.id.toString() === production.machineId);
             // Database'den gelen mevcut üretilen ürün sayısını kullan (production.partCount)
             const calculatedPartCount = production.partCount || 0;
             
-            // Mold verilerini kullan (database'den)
+            // Mold ve Product verilerini kullan (database'den)
             const moldData = production.moldData;
+            const productData = production.productData;
             
-            // Mold verilerinden bilgileri al
+            // Mold verilerinden bilgileri al (sadece temel bilgiler)
             const moldName = moldData?.name || 'N/A'; // KP-01 -> molds.name
             const productName = production.productName; // priz -> products.name (zaten production.productName'de)
-            const cycleTime = moldData?.cycle_time_sec || production.cycleTime; // molds.cycle_time_sec
-            const hourlyOutput = moldData?.hourly_production; // molds.hourly_production
-            const injectionTemp = moldData?.injection_temp_c; // molds.injection_temp_c
-            const moldTemp = moldData?.mold_temp_c; // molds.mold_temp_c
-            const material = moldData?.material; // molds.material
-            const partWeight = moldData?.part_weight_g; // molds.part_weight_g
+            // Excel kolonları artık productData'da
+            const cycleTime = productData?.cycle_time_sec || production.cycleTime; // products.cycle_time_sec
+            const hourlyOutput = productData?.hourly_production; // products.hourly_production
+            const injectionTemp = productData?.injection_temp_c; // products.injection_temp_c
+            const moldTemp = productData?.mold_temp_c; // products.mold_temp_c
+            const material = productData?.material; // products.material
+            const partWeight = productData?.part_weight_g; // products.part_weight_g
             
             // Makine kodu (KP-01 formatında) - mold name'den veya makine ID'den
             let machineCode = '';
@@ -1003,14 +1075,33 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
             );
             })
           );
-        })()}
+              })()}
+            </>
+          )}
         </View>
 
         {/* Makine Durumu */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Makine Durumu</Text>
-          {(() => {
-            // Aktif ve hedefe ulaşmamış duraklatılmış üretimlerdeki makineleri filtrele
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowMachineStatus(!showMachineStatus)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sectionTitle}>Makine Durumu</Text>
+            <Text style={styles.expandIcon}>
+              {showMachineStatus ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showMachineStatus && (
+            <>
+              {(() => {
+            // Tüm makineleri göster
+            if (backendMachines.length === 0) {
+              return <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>;
+            }
+            
+            // Aktif ve duraklatılmış üretimlerdeki makineleri bul
             const activeAndPausedProductions = activeProductions.filter(p => {
               if (p.status === 'active') return true;
               if (p.status === 'paused') {
@@ -1024,25 +1115,50 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
               machineIdToProduction.set(p.machineId, p);
             });
             
-            // Aktif ve duraklatılmış üretimlerdeki makineleri bul
-            const machinesInUse = backendMachines.filter(m => 
-              machineIdToProduction.has(m.id.toString())
-            );
-            
-            if (machinesInUse.length === 0) {
-              return <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>;
-            }
-            
-            return machinesInUse.map((machine) => {
+            // Tüm makineleri göster
+            return backendMachines.map((machine) => {
               const production = machineIdToProduction.get(machine.id.toString());
               const isRunning = production?.status === 'active';
-              const statusText = isRunning ? 'Çalışıyor' : 'Durdu';
-              const statusColor = isRunning ? '#27ae60' : '#e74c3c'; // Yeşil veya Kırmızı
+              const isPaused = production?.status === 'paused';
+              
+              // Makinenin kendi durumuna göre durum belirle
+              let statusText = '';
+              let statusColor = '#95a5a6'; // Varsayılan gri
+              
+              if (machine.status === 'maintenance') {
+                // Makine arızalı
+                statusText = 'Arızalı';
+                statusColor = '#e74c3c'; // Kırmızı
+              } else if (machine.status === 'inactive') {
+                // Makine pasif
+                statusText = 'Pasif';
+                statusColor = '#95a5a6'; // Gri
+              } else if (machine.status === 'active') {
+                // Makine aktif - üretim durumuna göre
+                if (isRunning) {
+                  statusText = 'Çalışıyor';
+                  statusColor = '#27ae60'; // Yeşil
+                } else if (isPaused) {
+                  statusText = 'Durduruldu';
+                  statusColor = '#f39c12'; // Turuncu
+                } else {
+                  statusText = 'Boşta';
+                  statusColor = '#3498db'; // Mavi
+                }
+              } else {
+                statusText = 'Bilinmeyen';
+                statusColor = '#95a5a6';
+              }
               
               return (
                 <View key={machine.id} style={styles.machineItem}>
                   <View style={styles.machineHeader}>
-                    <Text style={styles.machineName}>{machine.name}</Text>
+                    <View>
+                      <Text style={styles.machineName}>{machine.name}</Text>
+                      {machine.location && (
+                        <Text style={styles.machineLocation}>{machine.location}</Text>
+                      )}
+                    </View>
                     <View style={[
                       styles.statusBadge,
                       { backgroundColor: statusColor }
@@ -1052,10 +1168,17 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       </Text>
                     </View>
                   </View>
+                  {production && (
+                    <Text style={styles.machineProductionInfo}>
+                      Ürün: {production.productName} | Lot: {production.lotNo || 'N/A'}
+                    </Text>
+                  )}
                 </View>
               );
             });
-          })()}
+              })()}
+            </>
+          )}
         </View>
 
         {/* Navigation Buttons */}
@@ -1278,6 +1401,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#2c3e50',
+  },
+  machineLocation: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 4,
+  },
+  machineProductionInfo: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 5,
   },
   statusBadge: {
     paddingHorizontal: 10,
@@ -1621,6 +1754,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#7f8c8d',
     fontWeight: '500',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    fontWeight: 'bold',
+  },
+  searchContainer: {
+    marginBottom: 15,
+    marginTop: 10,
+  },
+  searchInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    color: '#2c3e50',
   },
 });
 

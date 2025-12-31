@@ -36,12 +36,7 @@ interface Mold {
   code: string;
   name: string;
   product_id?: number;
-  cycle_time_sec?: number;
-  hourly_production?: number;
-  injection_temp_c?: number;
-  mold_temp_c?: number;
-  material?: string;
-  part_weight_g?: number;
+  // Excel kolonları kaldırıldı - artık Product interface'inde
 }
 
 interface WorkOrder {
@@ -169,12 +164,13 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
         ) : (
           products.map((product) => {
             const mold = product.mold;
-            const cycleTime = mold?.cycle_time_sec || 0;
-            const hourlyOutput = mold?.hourly_production || 0;
-            const injectionTemp = mold?.injection_temp_c || 0;
-            const moldTemp = mold?.mold_temp_c || 0;
-            const material = mold?.material || '-';
-            const partWeight = mold?.part_weight_g || 0;
+            // Excel kolonları artık product'ta
+            const cycleTime = product.cycle_time_sec || 0;
+            const hourlyOutput = product.hourly_production || 0;
+            const injectionTemp = product.injection_temp_c || 0;
+            const moldTemp = product.mold_temp_c || 0;
+            const material = product.material || '-';
+            const partWeight = product.part_weight_g || 0;
             const moldName = mold?.name || '-';
             const isExpanded = expandedProducts.has(product.id);
             

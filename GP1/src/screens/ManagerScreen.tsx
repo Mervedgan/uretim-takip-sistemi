@@ -3,7 +3,7 @@
  * Tüm veriler ve genel üretim analizleri
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,11 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
+  Alert,
+  TextInput,
 } from 'react-native';
 import { User, ProductionRecord, Machine, ProductionAnalysis, OperatorPerformance, MachinePerformance, DailyProduction } from '../types';
-import { workOrdersAPI, machinesAPI, issuesAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, issuesAPI, authAPI } from '../utils/api';
 
 interface ManagerScreenProps {
   user: User;
@@ -40,7 +42,8 @@ interface WorkOrderStage {
   planned_end: string | null;
   actual_start: string | null;
   actual_end: string | null;
-  status: 'planned' | 'in_progress' | 'done';
+  status: 'planned' | 'in_progress' | 'done' | 'paused';
+  paused_at?: string | null;
 }
 
 interface BackendMachine {
@@ -71,6 +74,21 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [workOrderStages, setWorkOrderStages] = useState<Map<number, WorkOrderStage[]>>(new Map());
+  const [showAllStages, setShowAllStages] = useState<boolean>(false);
+  const [stageSearchQuery, setStageSearchQuery] = useState<string>(''); // Arama sorgusu
+  const [showIssues, setShowIssues] = useState<boolean>(true); // Varsayılan açık
+  const [showOperatorPerformance, setShowOperatorPerformance] = useState<boolean>(false);
+  const [showMachinePerformance, setShowMachinePerformance] = useState<boolean>(false);
+  const [showDailyProduction, setShowDailyProduction] = useState<boolean>(false);
+  const [users, setUsers] = useState<any[]>([]);
+  const [showUsers, setShowUsers] = useState<boolean>(false);
+  const [loadingUsers, setLoadingUsers] = useState<boolean>(false);
+  const [isUserSectionExpanding, setIsUserSectionExpanding] = useState<boolean>(false);
+
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollPositionRef = useRef<number>(0);
+  const userSectionYRef = useRef<number>(0); // Bölümün Y pozisyonu
+  const savedScrollYRef = useRef<number>(0); // Kaydedilen scroll pozisyonu
 
   // Backend'den veri yükle
   const loadBackendData = async () => {
@@ -440,14 +458,77 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
       });
   };
 
+  // Backend'den kullanıcıları yükle
+  const loadUsers = async () => {
+    try {
+      setLoadingUsers(true);
+      const usersData = await authAPI.listUsers();
+      setUsers(Array.isArray(usersData) ? usersData : []);
+    } catch (error: any) {
+      console.error('Error loading users:', error);
+      setUsers([]);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Silme fonksiyonu
+  const handleDeleteUser = (userId: number, username: string) => {
+    Alert.alert(
+      'Kullanıcıyı Sil',
+      `${username} kullanıcısını silmek istediğinize emin misiniz?`,
+      [
+        {
+          text: 'İptal',
+          style: 'cancel',
+        },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await authAPI.deleteUser(userId);
+              Alert.alert('Başarılı', 'Kullanıcı başarıyla silindi.');
+              await loadUsers(); // Listeyi yenile
+            } catch (error: any) {
+              Alert.alert('Hata', error.message || 'Kullanıcı silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Rol değiştirme fonksiyonu
+  const handleChangeRole = async (userId: number, currentRole: string) => {
+    const roles = ['admin', 'planner', 'worker'];
+    const currentIndex = roles.indexOf(currentRole);
+    const nextRole = roles[(currentIndex + 1) % roles.length];
+    
+    try {
+      await authAPI.changeUserRole(userId, nextRole);
+      Alert.alert('Başarılı', 'Kullanıcı rolü değiştirildi.');
+      await loadUsers(); // Listeyi yenile
+    } catch (error: any) {
+      Alert.alert('Hata', error.message || 'Kullanıcı rolü değiştirilemedi.');
+    }
+  };
+
   // Component mount olduğunda backend'den veri yükle
   useEffect(() => {
     loadBackendData();
+    loadUsers(); // Kullanıcıları yükle
     
     // Her 5 saniyede bir yenile
-    const interval = setInterval(loadBackendData, 5000);
+    const interval = setInterval(() => {
+      loadBackendData();
+      loadUsers(); // Kullanıcıları da yenile
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // showUsers değiştiğinde scroll pozisyonunu koru - KALDIRILDI
+  // Scroll pozisyonu onPress içinde yönetiliyor
 
   const formatDate = (date: string | Date) => {
     const d = date instanceof Date ? date : new Date(date);
@@ -480,7 +561,19 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.content}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled={true}
+        scrollEnabled={!isUserSectionExpanding}
+        onScroll={(event) => {
+          if (!isUserSectionExpanding) {
+            scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+          }
+        }}
+        scrollEventThrottle={16}
+      >
         <View style={styles.userInfo}>
           <Text style={styles.welcomeText}>Yönetici: {user.name}</Text>
           <Text style={styles.infoText}>Genel üretim analizleri ve raporlar</Text>
@@ -522,8 +615,20 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
         {/* Sorun Bildirimleri */}
         {issues.length > 0 && (
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>⚠️ Sorun Bildirimleri</Text>
-            {issues.map((issue) => {
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowIssues(!showIssues)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.sectionTitle}>⚠️ Sorun Bildirimleri</Text>
+              <Text style={styles.expandIcon}>
+                {showIssues ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showIssues && (
+              <>
+                {issues.map((issue) => {
               // Issue'un hangi work order ve stage'e ait olduğunu bul
               let workOrderId: number | null = null;
               let stageName = 'Bilinmeyen Aşama';
@@ -569,15 +674,215 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
                   )}
                 </View>
               );
-            })}
+                })}
+              </>
+            )}
           </View>
         )}
+
+        {/* Tüm İş Aşamaları */}
+        <View style={styles.sectionCard}>
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowAllStages(!showAllStages)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sectionTitle}>🔄 Tüm İş Aşamaları</Text>
+            <Text style={styles.expandIcon}>
+              {showAllStages ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showAllStages && (
+            <>
+              {/* Arama Çubuğu */}
+              <View style={styles.searchContainer}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="İş emri, aşama adı, ürün kodu veya lot no ile ara..."
+                  placeholderTextColor="#95a5a6"
+                  value={stageSearchQuery}
+                  onChangeText={setStageSearchQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {loading && !workOrders.length ? (
+            <ActivityIndicator size="small" color="#e74c3c" style={{ marginVertical: 20 }} />
+          ) : (() => {
+            // Tüm stage'leri topla (planned, in_progress, paused, done)
+            const allStages: Array<{
+              stage: WorkOrderStage;
+              workOrder: WorkOrder;
+            }> = [];
+            
+            for (const wo of workOrders) {
+              const stages = workOrderStages.get(wo.id) || [];
+              
+              // Tüm stage'leri ekle (sadece aktif olanlar değil)
+              for (const stage of stages) {
+                // Sadece done olmayan stage'leri göster
+                if (stage.status !== 'done') {
+                  allStages.push({ stage, workOrder: wo });
+                }
+              }
+            }
+            
+            if (allStages.length === 0) {
+              return <Text style={styles.emptyText}>İş aşaması bulunmuyor</Text>;
+            }
+            
+            // Arama sorgusuna göre filtrele
+            const filteredStages = stageSearchQuery.trim() === '' 
+              ? allStages 
+              : allStages.filter(({ stage, workOrder }) => {
+                  const query = stageSearchQuery.toLowerCase().trim();
+                  const workOrderId = workOrder.id.toString();
+                  const stageName = stage.stage_name.toLowerCase();
+                  const productCode = (workOrder.product_code || '').toLowerCase();
+                  const lotNo = (workOrder.lot_no || '').toLowerCase();
+                  
+                  return (
+                    workOrderId.includes(query) ||
+                    stageName.includes(query) ||
+                    productCode.includes(query) ||
+                    lotNo.includes(query)
+                  );
+                });
+            
+            if (filteredStages.length === 0) {
+              return <Text style={styles.emptyText}>Arama sonucu bulunamadı</Text>;
+            }
+            
+            // Stage'leri duruma göre sırala: in_progress > paused > planned
+            filteredStages.sort((a, b) => {
+              const statusOrder: Record<string, number> = {
+                'in_progress': 1,
+                'paused': 2,
+                'planned': 3,
+                'done': 4
+              };
+              return (statusOrder[a.stage.status] || 99) - (statusOrder[b.stage.status] || 99);
+            });
+            
+            return filteredStages.map(({ stage, workOrder }) => {
+              let statusText = '';
+              let statusColor = '#95a5a6';
+              
+              if (stage.status === 'in_progress') {
+                statusText = 'Devam Ediyor';
+                statusColor = '#3498db';
+              } else if (stage.status === 'paused') {
+                statusText = 'Durduruldu';
+                statusColor = '#e74c3c';
+              } else if (stage.status === 'planned') {
+                statusText = 'Planlandı';
+                statusColor = '#95a5a6';
+              } else if (stage.status === 'done') {
+                statusText = 'Tamamlandı';
+                statusColor = '#27ae60';
+              }
+              
+              // Stage'in başlangıç zamanından itibaren geçen süreyi hesapla (sadece başlatılmışsa)
+              let elapsedTime = '';
+              if (stage.actual_start) {
+                const startTime = new Date(stage.actual_start);
+                const now = new Date();
+                const elapsedMs = now.getTime() - startTime.getTime();
+                const hours = Math.floor(elapsedMs / (1000 * 60 * 60));
+                const minutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
+                if (hours > 0) {
+                  elapsedTime = `${hours}sa ${minutes}dk`;
+                } else {
+                  elapsedTime = `${minutes}dk`;
+                }
+              }
+              
+              return (
+                <View key={`${workOrder.id}-${stage.id}`} style={styles.activeStageCard}>
+                  <View style={styles.activeStageHeader}>
+                    <View>
+                      <Text style={styles.activeStageTitle}>
+                        İş Emri #{workOrder.id} - {stage.stage_name}
+                      </Text>
+                      <Text style={styles.activeStageProduct}>
+                        Ürün: {workOrder.product_code} | Lot: {workOrder.lot_no}
+                      </Text>
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                      <Text style={styles.statusBadgeText}>{statusText}</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.activeStageDetails}>
+                    <Text style={styles.activeStageDetail}>
+                      Hedef: {workOrder.qty} adet
+                    </Text>
+                    {stage.planned_start && (
+                      <Text style={styles.activeStageDetail}>
+                        Planlanan Başlangıç: {formatDateTime(new Date(stage.planned_start))}
+                      </Text>
+                    )}
+                    {stage.actual_start && (
+                      <Text style={styles.activeStageDetail}>
+                        Gerçek Başlangıç: {formatDateTime(new Date(stage.actual_start))}
+                      </Text>
+                    )}
+                    {elapsedTime && (
+                      <Text style={styles.activeStageDetail}>
+                        Süre: {elapsedTime}
+                      </Text>
+                    )}
+                    {workOrder.created_by_username && (
+                      <Text style={styles.activeStageDetail}>
+                        Operatör: {workOrder.created_by_username}
+                      </Text>
+                    )}
+                  </View>
+                  
+                  {/* Eğer paused ise, issue bilgisini göster */}
+                  {stage.status === 'paused' && (() => {
+                    const stageIssue = issues.find(
+                      issue => issue.work_order_stage_id === stage.id
+                    );
+                    if (stageIssue) {
+                      return (
+                        <View style={styles.pausedIssueInfo}>
+                          <Text style={styles.pausedIssueLabel}>⚠️ Durdurma Sebebi:</Text>
+                          <Text style={styles.pausedIssueText}>
+                            {stageIssue.description || 'Açıklama yok'}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })()}
+                </View>
+              );
+            });
+          })()}
+            </>
+          )}
+        </View>
 
         {/* Operatör Performansı */}
         {productionAnalysis && productionAnalysis.operatorPerformance.length > 0 && (
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Operatör Performansı</Text>
-            {productionAnalysis.operatorPerformance.map((operator) => (
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowOperatorPerformance(!showOperatorPerformance)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.sectionTitle}>Operatör Performansı</Text>
+              <Text style={styles.expandIcon}>
+                {showOperatorPerformance ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showOperatorPerformance && (
+              <>
+                {productionAnalysis.operatorPerformance.map((operator) => (
             <View key={operator.operatorId} style={styles.operatorCard}>
               <View style={styles.operatorHeader}>
                 <Text style={styles.operatorName}>{operator.operatorName}</Text>
@@ -613,14 +918,28 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
               </View>
             </View>
           ))}
+              </>
+            )}
           </View>
         )}
 
         {/* Makine Performansı */}
         {productionAnalysis && productionAnalysis.machinePerformance.length > 0 && (
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Makine Performansı</Text>
-            {productionAnalysis.machinePerformance.map((machine) => (
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowMachinePerformance(!showMachinePerformance)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.sectionTitle}>Makine Performansı</Text>
+              <Text style={styles.expandIcon}>
+                {showMachinePerformance ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showMachinePerformance && (
+              <>
+                {productionAnalysis.machinePerformance.map((machine) => (
             <View key={machine.machineId} style={styles.machineCard}>
               <View style={styles.machineHeader}>
                 <Text style={styles.machineName}>{machine.machineName}</Text>
@@ -650,14 +969,28 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
               </View>
             </View>
           ))}
+              </>
+            )}
           </View>
         )}
 
         {/* Günlük Üretim */}
         {productionAnalysis && productionAnalysis.dailyProduction.length > 0 && (
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Günlük Üretim Trendi</Text>
-            {productionAnalysis.dailyProduction.map((daily, index) => (
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowDailyProduction(!showDailyProduction)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.sectionTitle}>Günlük Üretim Trendi</Text>
+              <Text style={styles.expandIcon}>
+                {showDailyProduction ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showDailyProduction && (
+              <>
+                {productionAnalysis.dailyProduction.map((daily, index) => (
             <View key={index} style={styles.dailyCard}>
               <View style={styles.dailyHeader}>
                 <Text style={styles.dailyDate}>{formatDate(daily.date)}</Text>
@@ -675,7 +1008,128 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
               </View>
             </View>
           ))}
+              </>
+            )}
           </View>
+        )}
+
+        {/* Kullanıcı Yönetimi */}
+        <View 
+          style={styles.sectionCard}
+          onLayout={(event) => {
+            // Bölümün ekrandaki Y pozisyonunu al (üstten uzaklık)
+            const { y } = event.nativeEvent.layout;
+            userSectionYRef.current = y;
+          }}
+        >
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => {
+              // Mevcut scroll pozisyonunu kaydet
+              const currentScrollY = scrollPositionRef.current;
+              savedScrollYRef.current = currentScrollY;
+              
+              // State'i değiştir
+              const newShowUsers = !showUsers;
+              setShowUsers(newShowUsers);
+              
+              // Layout değişikliği tamamlandıktan sonra scroll pozisyonunu koru
+              // Daha kısa delay kullan ve scroll'u geçici olarak devre dışı bırak
+              setIsUserSectionExpanding(true);
+              
+              setTimeout(() => {
+                if (scrollViewRef.current) {
+                  scrollViewRef.current.scrollTo({
+                    y: currentScrollY,
+                    animated: false,
+                  });
+                }
+                // Scroll'u tekrar aktif et
+                setTimeout(() => {
+                  setIsUserSectionExpanding(false);
+                }, 100);
+              }, 100); // Daha kısa delay
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sectionTitle}>👥 Kullanıcı Yönetimi</Text>
+            <Text style={styles.expandIcon}>
+              {showUsers ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showUsers && (
+            <>
+              {loadingUsers ? (
+                <ActivityIndicator size="small" color="#e74c3c" style={{ marginVertical: 20 }} />
+              ) : users.length === 0 ? (
+                <Text style={styles.emptyText}>Kullanıcı bulunmuyor</Text>
+              ) : (
+                users.map((u) => {
+                  if (!u || !u.id) {
+                    return null; // Geçersiz kullanıcıyı atla
+                  }
+                  
+                  const roleColors: Record<string, string> = {
+                    'admin': '#e74c3c',
+                    'planner': '#9b59b6',
+                    'worker': '#3498db',
+                  };
+                  const roleTexts: Record<string, string> = {
+                    'admin': 'Yönetici',
+                    'planner': 'Planlayıcı',
+                    'worker': 'Operatör',
+                  };
+                  
+                  const userRole = (u.role && typeof u.role === 'string') ? u.role : 'worker';
+                  const isCurrentUser = u.id.toString() === user.id.toString();
+                  const username = (u.username && typeof u.username === 'string') ? u.username : 'Bilinmeyen Kullanıcı';
+                  
+                  return (
+                    <View key={u.id} style={styles.userCard}>
+                      <View style={styles.userHeader}>
+                        <View>
+                          <Text style={styles.userName}>{username}</Text>
+                          {u.email && typeof u.email === 'string' && (
+                            <Text style={styles.userEmail}>{u.email}</Text>
+                          )}
+                          {u.phone && typeof u.phone === 'string' && (
+                            <Text style={styles.userPhone}>{u.phone}</Text>
+                          )}
+                        </View>
+                        <View style={[styles.roleBadge, { backgroundColor: roleColors[userRole] || '#95a5a6' }]}>
+                          <Text style={styles.roleBadgeText}>{roleTexts[userRole] || userRole}</Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.userActions}>
+                        <TouchableOpacity
+                          style={[styles.roleButton, { backgroundColor: '#9b59b6' }]}
+                          onPress={() => handleChangeRole(u.id, userRole)}
+                          disabled={isCurrentUser}
+                        >
+                          <Text style={styles.actionButtonText}>Rol Değiştir</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.deleteButton, { backgroundColor: '#e74c3c' }]}
+                          onPress={() => handleDeleteUser(u.id, username)}
+                          disabled={isCurrentUser}
+                        >
+                          <Text style={styles.actionButtonText}>Sil</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {isCurrentUser && (
+                        <Text style={styles.currentUserNote}>
+                          ⚠️ Kendi hesabınızı silemez veya rolünüzü değiştiremezsiniz
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </>
+          )}
+        </View>
         )}
       </ScrollView>
     </View>
@@ -1035,6 +1489,165 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 20,
     fontStyle: 'italic',
+  },
+  activeStageCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3498db',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  activeStageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  activeStageTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  activeStageProduct: {
+    fontSize: 13,
+    color: '#7f8c8d',
+  },
+  activeStageDetails: {
+    marginTop: 8,
+  },
+  activeStageDetail: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginBottom: 4,
+  },
+  pausedIssueInfo: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#fff3cd',
+    borderRadius: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ffc107',
+  },
+  pausedIssueLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#856404',
+    marginBottom: 4,
+  },
+  pausedIssueText: {
+    fontSize: 13,
+    color: '#856404',
+  },
+  statusBadgeText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    fontWeight: 'bold',
+  },
+  userCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3498db',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  userHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  userEmail: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  userPhone: {
+    fontSize: 13,
+    color: '#7f8c8d',
+  },
+  roleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  roleBadgeText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  userActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  roleButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  deleteButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  currentUserNote: {
+    fontSize: 12,
+    color: '#e74c3c',
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+  searchContainer: {
+    marginBottom: 15,
+    marginTop: 10,
+  },
+  searchInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    color: '#2c3e50',
   },
 });
 

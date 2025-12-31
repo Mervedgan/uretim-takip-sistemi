@@ -87,3 +87,4 @@ def downgrade() -> None:
     op.drop_column('products', 'cycle_time_sec')
     op.drop_column('products', 'cavity_count')
 
+

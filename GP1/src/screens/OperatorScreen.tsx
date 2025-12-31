@@ -89,6 +89,13 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
   const [showStages, setShowStages] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   
+  // Dashboard accordion states
+  const [showActiveWorkOrders, setShowActiveWorkOrders] = useState<boolean>(false);
+  const [workOrderSearchQuery, setWorkOrderSearchQuery] = useState<string>(''); // İş emri arama sorgusu
+  const [showWorkOrderStages, setShowWorkOrderStages] = useState<boolean>(false);
+  const [showMachines, setShowMachines] = useState<boolean>(false);
+  const [showMachineReadings, setShowMachineReadings] = useState<boolean>(false);
+  
   // Mold state
   const [molds, setMolds] = useState<any[]>([]);
   const [selectedMoldId, setSelectedMoldId] = useState<number | null>(null);
@@ -102,10 +109,11 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
   const [hourlyProduction, setHourlyProduction] = useState('');
   const [cavityCount, setCavityCount] = useState('');
 
-  // Load products when new production tab is active
+  // Load products and machines when new production tab is active
   useEffect(() => {
     if (activeTab === 'new') {
       loadProducts();
+      loadMachines(); // Makineleri de yükle
     }
   }, [activeTab]);
 
@@ -157,6 +165,24 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
     }
   };
 
+  // Makineleri yükle (üretim formu için)
+  const loadMachines = async () => {
+    try {
+      const machinesResponse = await machinesAPI.getMachines();
+      const machinesData = machinesResponse.data || machinesResponse;
+      const machinesList = Array.isArray(machinesData) ? machinesData : [];
+      setMachines(machinesList);
+      
+      // İlk aktif makineyi seç
+      const activeMachine = machinesList.find((m: Machine) => m.status === 'active') || machinesList[0];
+      if (activeMachine && !machineId) {
+        setMachineId(activeMachine.id.toString());
+      }
+    } catch (error: any) {
+      console.error('Error loading machines:', error);
+    }
+  };
+
   // Ürün seçildiğinde o ürüne ait mold'ları yükle
   const loadMoldsForProduct = async (productId: number) => {
     try {
@@ -181,14 +207,20 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
     setSelectedMoldId(mold.id);
     setSelectedMold(mold);
     
-    // Mold bilgilerini form alanlarına doldur
-    if (mold.cycle_time_sec) setCycleTime(mold.cycle_time_sec.toString());
-    if (mold.injection_temp_c) setInjectionTemp(mold.injection_temp_c.toString());
-    if (mold.mold_temp_c) setMoldTemp(mold.mold_temp_c.toString());
-    if (mold.material) setMaterial(mold.material);
-    if (mold.part_weight_g) setPartWeight(mold.part_weight_g.toString());
-    if (mold.hourly_production) setHourlyProduction(mold.hourly_production.toString());
-    if (mold.cavity_count) setCavityCount(mold.cavity_count.toString());
+    // Excel kolonları artık products tablosunda - mold'un product_id'sine göre product'ı bul
+    if (mold.product_id) {
+      const product = products.find((p: any) => p.id === mold.product_id);
+      if (product) {
+        // Product bilgilerini form alanlarına doldur
+        if (product.cycle_time_sec) setCycleTime(product.cycle_time_sec.toString());
+        if (product.injection_temp_c) setInjectionTemp(product.injection_temp_c.toString());
+        if (product.mold_temp_c) setMoldTemp(product.mold_temp_c.toString());
+        if (product.material) setMaterial(product.material);
+        if (product.part_weight_g) setPartWeight(product.part_weight_g.toString());
+        if (product.hourly_production) setHourlyProduction(product.hourly_production.toString());
+        if (product.cavity_count) setCavityCount(product.cavity_count.toString());
+      }
+    }
   };
 
   const loadDashboardData = async () => {
@@ -208,13 +240,19 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       const machinesResponse = await machinesAPI.getMachines();
       // Backend returns { total, data } or just array
       const machinesData = machinesResponse.data || machinesResponse;
-      setMachines(Array.isArray(machinesData) ? machinesData : []);
+      const machinesList = Array.isArray(machinesData) ? machinesData : [];
+      setMachines(machinesList);
 
-      // Select first active machine if available
-      const activeMachine = machines.find(m => m.status === 'active') || machines[0];
+      // Select first active machine if available (for dashboard)
+      const activeMachine = machinesList.find((m: Machine) => m.status === 'active') || machinesList[0];
       if (activeMachine && !selectedMachine) {
         setSelectedMachine(activeMachine.id);
         loadMachineReadings(activeMachine.id);
+      }
+      
+      // Üretim formu için ilk aktif makineyi seç
+      if (activeMachine && !machineId) {
+        setMachineId(activeMachine.id.toString());
       }
     } catch (error: any) {
       console.error('Error loading dashboard data:', error);
@@ -362,6 +400,12 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       return;
     }
 
+    // Makine seçimi kontrolü
+    if (!machineId.trim()) {
+      Alert.alert('Hata', 'Lütfen bir makine seçin!');
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -407,15 +451,23 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       const endTime = new Date(now.getTime() + 4 * 60 * 60 * 1000); // 4 saat sonra
 
       // Backend'e work order oluştur
+      const parsedMachineId = parseInt(machineId, 10);
+      if (isNaN(parsedMachineId) || parsedMachineId <= 0) {
+        Alert.alert('Hata', 'Geçersiz makine seçimi! Lütfen bir makine seçin.');
+        return;
+      }
+
       const workOrderData = {
         product_code: trimmedProductCode,
         lot_no: lotNo.trim(),
         qty: parseInt(targetCount),
         planned_start: now.toISOString(),
         planned_end: endTime.toISOString(),
+        machine_id: parsedMachineId,  // Seçilen makine ID'si
       };
 
       console.log('📤 OperatorScreen - Work order oluşturuluyor:', workOrderData);
+      console.log('📤 Selected machineId:', machineId, 'Parsed:', parsedMachineId);
       const result = await workOrdersAPI.createWorkOrder(workOrderData);
       
       // Work order oluşturulduktan sonra ilk stage'i başlat
@@ -547,19 +599,25 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
   };
 
   const renderDashboard = () => {
-    // Aktif iş emirleri: Bitiş tarihi gelecekte olan tüm iş emirleri
-    // Planner'ın oluşturduğu iş emirleri de dahil (stage durumuna bakmadan)
-    // Çünkü planner'ın oluşturduğu iş emirleri henüz başlatılmamış olabilir
+    // Aktif iş emirleri: Sadece bitiş tarihi geçmemiş olanları göster
+    // Başlatılmış/bitmemiş/tamamlanmış fark etmez, sadece tarih kontrolü yap
+    // Planner'ın oluşturduğu iş emirleri de dahil (henüz başlatılmamış olabilir)
     const now = new Date();
     const activeWorkOrders = workOrders.filter(wo => {
-      if (!wo.planned_end) return false;
+      if (!wo.planned_end) {
+        // Bitiş tarihi yoksa göster (henüz planlanmamış olabilir)
+        return true;
+      }
+      
       try {
         const endDate = new Date(wo.planned_end);
-        // Bitiş tarihi gelecekte olan tüm iş emirlerini göster
-        return endDate > now;
+        // Bitiş tarihi gelecekte veya bugün ise göster
+        // Bitiş tarihi geçmişte ise gösterme
+        return endDate >= now;
       } catch (error) {
         console.error('Error parsing planned_end date:', wo.planned_end, error);
-        return false;
+        // Tarih parse edilemezse göster (güvenli tarafta kal)
+        return true;
       }
     });
 
@@ -578,43 +636,102 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
 
         {/* Aktif İş Emirleri */}
         <View style={styles.dashboardCard}>
-          <Text style={styles.cardTitle}>📋 Aktif İş Emirleri</Text>
-          {loading && !workOrders.length ? (
-            <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
-          ) : activeWorkOrders.length === 0 ? (
-            <Text style={styles.emptyText}>Aktif iş emri bulunmuyor</Text>
-          ) : (
-            activeWorkOrders.slice(0, 5).map((wo) => (
-              <TouchableOpacity
-                key={wo.id}
-                style={[
-                  styles.workOrderItem,
-                  selectedWorkOrder === wo.id && styles.workOrderItemSelected
-                ]}
-                onPress={() => loadWorkOrderStages(wo.id)}
-              >
-                <View style={styles.workOrderHeader}>
-                  <Text style={styles.workOrderTitle}>İş Emri #{wo.id}</Text>
-                  <Text style={styles.workOrderCode}>{wo.product_code}</Text>
-                </View>
-                <Text style={styles.workOrderDetail}>Lot: {wo.lot_no}</Text>
-                <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
-                <Text style={styles.workOrderDetail}>
-                  Başlangıç: {formatDate(wo.planned_start)}
-                </Text>
-                <Text style={styles.workOrderDetail}>
-                  Bitiş: {formatDate(wo.planned_end)}
-                </Text>
-              </TouchableOpacity>
-            ))
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowActiveWorkOrders(!showActiveWorkOrders)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.cardTitle}>📋 Aktif İş Emirleri</Text>
+            <Text style={styles.expandIcon}>
+              {showActiveWorkOrders ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showActiveWorkOrders && (
+            <>
+              {/* Arama Çubuğu */}
+              <View style={styles.searchContainer}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="İş emri, ürün kodu veya lot no ile ara..."
+                  placeholderTextColor="#95a5a6"
+                  value={workOrderSearchQuery}
+                  onChangeText={setWorkOrderSearchQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {(() => {
+                // Arama sorgusuna göre filtrele
+                const filteredWorkOrders = workOrderSearchQuery.trim() === '' 
+                  ? activeWorkOrders 
+                  : activeWorkOrders.filter(wo => {
+                      const query = workOrderSearchQuery.toLowerCase().trim();
+                      const workOrderId = wo.id.toString();
+                      const productCode = (wo.product_code || '').toLowerCase();
+                      const lotNo = (wo.lot_no || '').toLowerCase();
+                      
+                      return (
+                        workOrderId.includes(query) ||
+                        productCode.includes(query) ||
+                        lotNo.includes(query)
+                      );
+                    });
+                
+                return loading && !workOrders.length ? (
+                  <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
+                ) : filteredWorkOrders.length === 0 ? (
+                  <Text style={styles.emptyText}>
+                    {workOrderSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Aktif iş emri bulunmuyor'}
+                  </Text>
+                ) : (
+                  filteredWorkOrders.slice(0, 5).map((wo) => (
+                    <TouchableOpacity
+                      key={wo.id}
+                      style={[
+                        styles.workOrderItem,
+                        selectedWorkOrder === wo.id && styles.workOrderItemSelected
+                      ]}
+                      onPress={() => loadWorkOrderStages(wo.id)}
+                    >
+                      <View style={styles.workOrderHeader}>
+                        <Text style={styles.workOrderTitle}>İş Emri #{wo.id}</Text>
+                        <Text style={styles.workOrderCode}>{wo.product_code}</Text>
+                      </View>
+                      <Text style={styles.workOrderDetail}>Lot: {wo.lot_no}</Text>
+                      <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
+                      <Text style={styles.workOrderDetail}>
+                        Başlangıç: {formatDate(wo.planned_start)}
+                      </Text>
+                      <Text style={styles.workOrderDetail}>
+                        Bitiş: {formatDate(wo.planned_end)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                );
+              })()}
+            </>
           )}
         </View>
 
         {/* İş Emri Aşamaları */}
         {selectedWorkOrder && stages.length > 0 && (
           <View style={styles.dashboardCard}>
-            <Text style={styles.cardTitle}>🔄 İş Emri Aşamaları (WO #{selectedWorkOrder})</Text>
-            {stages.map((stage) => (
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowWorkOrderStages(!showWorkOrderStages)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cardTitle}>🔄 İş Emri Aşamaları (WO #{selectedWorkOrder})</Text>
+              <Text style={styles.expandIcon}>
+                {showWorkOrderStages ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showWorkOrderStages && (
+              <>
+                {stages.map((stage) => (
               <View key={stage.id} style={styles.stageItem}>
                 <View style={styles.stageHeader}>
                   <Text style={styles.stageName}>{stage.stage_name}</Text>
@@ -677,14 +794,28 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                   )}
                 </View>
               </View>
-            ))}
+                ))}
+              </>
+            )}
           </View>
         )}
 
         {/* Makineler */}
         <View style={styles.dashboardCard}>
-          <Text style={styles.cardTitle}>🏭 Makineler</Text>
-          {loading && !machines.length ? (
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowMachines(!showMachines)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.cardTitle}>🏭 Makineler</Text>
+            <Text style={styles.expandIcon}>
+              {showMachines ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showMachines && (
+            <>
+              {loading && !machines.length ? (
             <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
           ) : machines.length === 0 ? (
             <Text style={styles.emptyText}>Makine bulunmuyor</Text>
@@ -715,16 +846,30 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                 )}
               </TouchableOpacity>
             ))
+              )}
+            </>
           )}
         </View>
 
         {/* Makine Okumaları */}
         {selectedMachine && machineReadings.length > 0 && (
           <View style={styles.dashboardCard}>
-            <Text style={styles.cardTitle}>
-              📊 Makine Okumaları ({machines.find(m => m.id === selectedMachine)?.name || 'Makine'})
-            </Text>
-            {machineReadings.slice(0, 5).map((reading) => (
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowMachineReadings(!showMachineReadings)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cardTitle}>
+                📊 Makine Okumaları ({machines.find(m => m.id === selectedMachine)?.name || 'Makine'})
+              </Text>
+              <Text style={styles.expandIcon}>
+                {showMachineReadings ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showMachineReadings && (
+              <>
+                {machineReadings.slice(0, 5).map((reading) => (
               <View key={reading.id} style={styles.readingItem}>
                 <View style={styles.readingHeader}>
                   <Text style={styles.readingType}>{reading.reading_type}</Text>
@@ -734,7 +879,9 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                   {formatDate(reading.timestamp)}
                 </Text>
               </View>
-            ))}
+                ))}
+              </>
+            )}
           </View>
         )}
       </ScrollView>
@@ -940,6 +1087,40 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               </Text>
             </View>
           )}
+
+          {/* Makine Seçimi */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Makine Seçimi *</Text>
+            {machines.length > 0 ? (
+              <ScrollView style={styles.machinesList} nestedScrollEnabled={true}>
+                {machines
+                  .filter((m: Machine) => m.status === 'active')
+                  .map((machine: Machine) => (
+                    <TouchableOpacity
+                      key={machine.id}
+                      style={[
+                        styles.machineItem,
+                        machineId === machine.id.toString() && styles.machineItemSelected
+                      ]}
+                      onPress={() => {
+                        setMachineId(machine.id.toString());
+                      }}
+                    >
+                      <Text style={styles.machineItemText}>
+                        {machine.name} {machine.location ? `- ${machine.location}` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.hintText}>
+                Makine bulunamadı. Lütfen backend'den makine ekleyin.
+              </Text>
+            )}
+            <Text style={styles.hintText}>
+              Bu üretim için kullanılacak makineyi seçin
+            </Text>
+          </View>
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Üretim Aşama Sayısı (Opsiyonel)</Text>
@@ -1389,6 +1570,16 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 5,
   },
+  machinesList: {
+    maxHeight: 150,
+    marginTop: 10,
+    marginBottom: 5,
+  },
+  machineItemText: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
   moldItem: {
     padding: 12,
     marginBottom: 8,
@@ -1403,6 +1594,41 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   moldItemText: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    fontWeight: 'bold',
+  },
+  searchContainer: {
+    marginBottom: 15,
+    marginTop: 10,
+  },
+  searchInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    color: '#2c3e50',
+  },
+  machinesList: {
+    maxHeight: 150,
+    marginTop: 10,
+    marginBottom: 5,
+  },
+  machineItemText: {
     fontSize: 14,
     color: '#2c3e50',
     fontWeight: '500',

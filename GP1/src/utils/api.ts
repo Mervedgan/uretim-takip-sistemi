@@ -287,6 +287,36 @@ export const authAPI = {
       console.error('Logout error:', error);
     }
   },
+
+  async listUsers() {
+    try {
+      const response = await apiClient.get('/auth/users');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error listing users:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcılar yüklenemedi');
+    }
+  },
+
+  async deleteUser(userId: number) {
+    try {
+      const response = await apiClient.delete(`/auth/users/${userId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcı silinemedi');
+    }
+  },
+
+  async changeUserRole(userId: number, role: string) {
+    try {
+      const response = await apiClient.patch(`/auth/users/${userId}/role`, { role });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error changing user role:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Kullanıcı rolü değiştirilemedi');
+    }
+  },
 };
 
 /**
@@ -508,6 +538,14 @@ export const productsAPI = {
     code: string;
     name: string;
     description?: string;
+    // Molds'tan taşınan Excel kolonları
+    cavity_count?: number;
+    cycle_time_sec?: number;
+    injection_temp_c?: number;
+    mold_temp_c?: number;
+    material?: string;
+    part_weight_g?: number;
+    hourly_production?: number;
   }) {
     try {
       const response = await apiClient.post('/products', data);
@@ -521,6 +559,14 @@ export const productsAPI = {
   async updateProduct(productId: number, data: {
     name?: string;
     description?: string;
+    // Molds'tan taşınan Excel kolonları
+    cavity_count?: number;
+    cycle_time_sec?: number;
+    injection_temp_c?: number;
+    mold_temp_c?: number;
+    material?: string;
+    part_weight_g?: number;
+    hourly_production?: number;
   }) {
     try {
       const response = await apiClient.patch(`/products/${productId}`, data);
@@ -582,13 +628,7 @@ export const moldsAPI = {
     description?: string;
     product_id?: number;
     status?: string;
-    cavity_count?: number;
-    cycle_time_sec?: number;
-    injection_temp_c?: number;
-    mold_temp_c?: number;
-    material?: string;
-    part_weight_g?: number;
-    hourly_production?: number;
+    // Excel kolonları kaldırıldı - artık products tablosunda
   }) {
     try {
       const response = await apiClient.post('/molds', data);
@@ -604,13 +644,7 @@ export const moldsAPI = {
     description?: string;
     product_id?: number;
     status?: string;
-    cavity_count?: number;
-    cycle_time_sec?: number;
-    injection_temp_c?: number;
-    mold_temp_c?: number;
-    material?: string;
-    part_weight_g?: number;
-    hourly_production?: number;
+    // Excel kolonları kaldırıldı - artık products tablosunda
   }) {
     try {
       const response = await apiClient.patch(`/molds/${moldId}`, data);

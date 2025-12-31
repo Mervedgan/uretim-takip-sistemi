@@ -84,6 +84,16 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [plannedStart, setPlannedStart] = useState('');
   const [plannedEnd, setPlannedEnd] = useState('');
   const [stageCount, setStageCount] = useState('2'); // Varsayılan 2 aşama
+  const [stageNames, setStageNames] = useState<string[]>([]);
+  const [showStages, setShowStages] = useState(false);
+  
+  // Dashboard accordion states
+  const [showIssues, setShowIssues] = useState<boolean>(true); // Varsayılan açık
+  const [showActiveWorkOrders, setShowActiveWorkOrders] = useState<boolean>(true); // Varsayılan açık
+  const [workOrderSearchQuery, setWorkOrderSearchQuery] = useState<string>(''); // İş emri arama sorgusu
+  const [showWorkOrderStages, setShowWorkOrderStages] = useState<boolean>(true); // Varsayılan açık
+  const [stageSearchQuery, setStageSearchQuery] = useState<string>(''); // Arama sorgusu
+  const [showMachines, setShowMachines] = useState<boolean>(false);
 
   // Load dashboard data
   useEffect(() => {
@@ -101,6 +111,22 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       return () => clearInterval(interval);
     }
   }, [activeTab]);
+
+  // Aşama sayısı değiştiğinde veya "Yeni İş Emri" sekmesine geçildiğinde input alanlarını göster
+  useEffect(() => {
+    if (activeTab === 'new') {
+      const countNum = parseInt(stageCount) || 0;
+      if (countNum > 0 && countNum <= 10) {
+        const newStageNames = Array(countNum).fill('').map((_, index) => 
+          stageNames[index] || ''
+        );
+        setStageNames(newStageNames);
+        setShowStages(true);
+      } else {
+        setShowStages(false);
+      }
+    }
+  }, [activeTab, stageCount]);
 
   const loadDashboardData = async () => {
     try {
@@ -197,6 +223,31 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
     setRefreshing(false);
   };
 
+  // Aşama sayısı değiştiğinde input alanlarını oluştur
+  // Her zaman input alanlarını güncelle, değer aynı olsa bile
+  const handleStageCountChange = (count: string) => {
+    const countNum = parseInt(count) || 0;
+    setStageCount(count);
+    
+    if (countNum > 0 && countNum <= 10) {
+      const newStageNames = Array(countNum).fill('').map((_, index) => 
+        stageNames[index] || ''
+      );
+      setStageNames(newStageNames);
+      setShowStages(true);
+    } else if (countNum === 0) {
+      setStageNames([]);
+      setShowStages(false);
+    }
+  };
+
+  // Aşama ismini güncelle
+  const handleStageNameChange = (index: number, name: string) => {
+    const newStageNames = [...stageNames];
+    newStageNames[index] = name;
+    setStageNames(newStageNames);
+  };
+
   const handleCreateWorkOrder = async () => {
     // Validation
     if (!productCode.trim()) {
@@ -258,6 +309,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         planned_start: startDate.toISOString(),
         planned_end: endDate.toISOString(),
         stage_count: parseInt(stageCount),
+        stage_names: stageNames.filter(name => name.trim() !== ''), // Boş olmayan isimleri gönder
       };
 
       console.log('📤 PlannerScreen - İş emri oluşturuluyor:', workOrderData);
@@ -274,6 +326,8 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           setPlannedStart('');
           setPlannedEnd('');
           setStageCount('2');
+          setStageNames([]);
+          setShowStages(false);
           // Dashboard'a geç ve verileri yenile
           setActiveTab('dashboard');
           loadDashboardData();
@@ -343,8 +397,20 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         {/* Sorun Bildirimleri */}
         {issues.length > 0 && (
           <View style={styles.dashboardCard}>
-            <Text style={styles.cardTitle}>⚠️ Sorun Bildirimleri</Text>
-            {issues.map((issue) => {
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowIssues(!showIssues)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cardTitle}>⚠️ Sorun Bildirimleri</Text>
+              <Text style={styles.expandIcon}>
+                {showIssues ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showIssues && (
+              <>
+                {issues.map((issue) => {
               // Issue'un hangi work order ve stage'e ait olduğunu bul
               let workOrderId: number | null = null;
               let stageName = 'Bilinmeyen Aşama';
@@ -390,59 +456,147 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                   )}
                 </View>
               );
-            })}
+                })}
+              </>
+            )}
           </View>
         )}
 
         {/* Aktif İş Emirleri */}
         <View style={styles.dashboardCard}>
-          <Text style={styles.cardTitle}>📋 Aktif İş Emirleri</Text>
-          {loading && !workOrders.length ? (
-            <ActivityIndicator size="small" color="#9b59b6" style={{ marginVertical: 20 }} />
-          ) : activeWorkOrders.length === 0 ? (
-            <Text style={styles.emptyText}>Aktif iş emri bulunmuyor</Text>
-          ) : (
-            activeWorkOrders.map((wo) => (
-              <TouchableOpacity
-                key={wo.id}
-                style={[
-                  styles.workOrderItem,
-                  selectedWorkOrder === wo.id && styles.workOrderItemSelected
-                ]}
-                onPress={() => loadWorkOrderStages(wo.id)}
-              >
-                <View style={styles.workOrderHeader}>
-                  <Text style={styles.workOrderId}>İş Emri #{wo.id}</Text>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      { backgroundColor: '#3498db' }
-                    ]}
-                  >
-                    <Text style={styles.statusText}>Aktif</Text>
-                  </View>
-                </View>
-                <Text style={styles.workOrderDetail}>Ürün: {wo.product_code}</Text>
-                <Text style={styles.workOrderDetail}>Lot: {wo.lot_no}</Text>
-                <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
-                <Text style={styles.workOrderDetail}>
-                  Başlangıç: {formatDate(wo.planned_start)}
-                </Text>
-                <Text style={styles.workOrderDetail}>
-                  Bitiş: {formatDate(wo.planned_end)}
-                </Text>
-              </TouchableOpacity>
-            ))
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowActiveWorkOrders(!showActiveWorkOrders)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.cardTitle}>📋 Aktif İş Emirleri</Text>
+            <Text style={styles.expandIcon}>
+              {showActiveWorkOrders ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showActiveWorkOrders && (
+            <>
+              {/* Arama Çubuğu */}
+              <View style={styles.searchContainer}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="İş emri, ürün kodu veya lot no ile ara..."
+                  placeholderTextColor="#95a5a6"
+                  value={workOrderSearchQuery}
+                  onChangeText={setWorkOrderSearchQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {(() => {
+                // Arama sorgusuna göre filtrele
+                const filteredWorkOrders = workOrderSearchQuery.trim() === '' 
+                  ? activeWorkOrders 
+                  : activeWorkOrders.filter(wo => {
+                      const query = workOrderSearchQuery.toLowerCase().trim();
+                      const workOrderId = wo.id.toString();
+                      const productCode = (wo.product_code || '').toLowerCase();
+                      const lotNo = (wo.lot_no || '').toLowerCase();
+                      
+                      return (
+                        workOrderId.includes(query) ||
+                        productCode.includes(query) ||
+                        lotNo.includes(query)
+                      );
+                    });
+                
+                return loading && !workOrders.length ? (
+                  <ActivityIndicator size="small" color="#9b59b6" style={{ marginVertical: 20 }} />
+                ) : filteredWorkOrders.length === 0 ? (
+                  <Text style={styles.emptyText}>
+                    {workOrderSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Aktif iş emri bulunmuyor'}
+                  </Text>
+                ) : (
+                  filteredWorkOrders.map((wo) => (
+                    <TouchableOpacity
+                      key={wo.id}
+                      style={[
+                        styles.workOrderItem,
+                        selectedWorkOrder === wo.id && styles.workOrderItemSelected
+                      ]}
+                      onPress={() => loadWorkOrderStages(wo.id)}
+                    >
+                      <View style={styles.workOrderHeader}>
+                        <Text style={styles.workOrderId}>İş Emri #{wo.id}</Text>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            { backgroundColor: '#3498db' }
+                          ]}
+                        >
+                          <Text style={styles.statusText}>Aktif</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.workOrderDetail}>Ürün: {wo.product_code}</Text>
+                      <Text style={styles.workOrderDetail}>Lot: {wo.lot_no}</Text>
+                      <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
+                      <Text style={styles.workOrderDetail}>
+                        Başlangıç: {formatDate(wo.planned_start)}
+                      </Text>
+                      <Text style={styles.workOrderDetail}>
+                        Bitiş: {formatDate(wo.planned_end)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                );
+              })()}
+            </>
           )}
         </View>
 
         {/* Aşamalar */}
         {selectedWorkOrder && stages.length > 0 && (
           <View style={styles.dashboardCard}>
-            <Text style={styles.cardTitle}>
-              🔄 İş Emri #{selectedWorkOrder} - Aşamalar
-            </Text>
-            {stages.map((stage) => (
+            <TouchableOpacity 
+              style={styles.sectionHeader}
+              onPress={() => setShowWorkOrderStages(!showWorkOrderStages)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cardTitle}>
+                🔄 İş Emri #{selectedWorkOrder} - Aşamalar
+              </Text>
+              <Text style={styles.expandIcon}>
+                {showWorkOrderStages ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {showWorkOrderStages && (
+              <>
+                {/* Arama Çubuğu */}
+                <View style={styles.searchContainer}>
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Aşama adı ile ara..."
+                    placeholderTextColor="#95a5a6"
+                    value={stageSearchQuery}
+                    onChangeText={setStageSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                {(() => {
+                  // Arama sorgusuna göre filtrele
+                  const filteredStages = stageSearchQuery.trim() === '' 
+                    ? stages 
+                    : stages.filter(stage => {
+                        const query = stageSearchQuery.toLowerCase().trim();
+                        const stageName = stage.stage_name.toLowerCase();
+                        return stageName.includes(query);
+                      });
+                  
+                  if (filteredStages.length === 0) {
+                    return <Text style={styles.emptyText}>Arama sonucu bulunamadı</Text>;
+                  }
+                  
+                  return filteredStages.map((stage) => (
               <View key={stage.id} style={styles.stageItem}>
                 <View style={styles.stageHeader}>
                   <Text style={styles.stageName}>{stage.stage_name}</Text>
@@ -483,14 +637,29 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                   )}
                 </View>
               </View>
-            ))}
+                  ));
+                })()}
+              </>
+            )}
           </View>
         )}
 
         {/* Makineler */}
         <View style={styles.dashboardCard}>
-          <Text style={styles.cardTitle}>🏭 Makineler</Text>
-          {loading && !machines.length ? (
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowMachines(!showMachines)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.cardTitle}>🏭 Makineler</Text>
+            <Text style={styles.expandIcon}>
+              {showMachines ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showMachines && (
+            <>
+              {loading && !machines.length ? (
             <ActivityIndicator size="small" color="#9b59b6" style={{ marginVertical: 20 }} />
           ) : machines.length === 0 ? (
             <Text style={styles.emptyText}>Makine bulunmuyor</Text>
@@ -514,6 +683,8 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                 )}
               </View>
             ))
+              )}
+            </>
           )}
         </View>
       </ScrollView>
@@ -593,7 +764,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
             <TextInput
               style={styles.input}
               value={stageCount}
-              onChangeText={setStageCount}
+              onChangeText={handleStageCountChange}
               placeholder="Örn: 2"
               keyboardType="numeric"
             />
@@ -601,6 +772,27 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
               Oluşturulacak üretim aşaması sayısı (örn: 2, 3, 4...)
             </Text>
           </View>
+
+          {/* Aşama İsimleri */}
+          {showStages && stageNames.length > 0 && (
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Aşama Başlıkları (Her aşamada ne yapılacağını yazın)</Text>
+              {stageNames.map((name, index) => (
+                <View key={index} style={{ marginBottom: 10 }}>
+                  <TextInput
+                    style={styles.input}
+                    value={name}
+                    onChangeText={(text) => handleStageNameChange(index, text)}
+                    placeholder={`Aşama ${index + 1} - Ne yapılacak? (örn: Enjeksiyon, Montaj, Kontrol)`}
+                  />
+                </View>
+              ))}
+              <Text style={styles.hintText}>
+                Her aşama için başlık yazın (örn: "Enjeksiyon", "Montaj", "Kontrol"). 
+                Boş bırakırsanız otomatik isimler oluşturulur.
+              </Text>
+            </View>
+          )}
 
           <TouchableOpacity 
             style={styles.createButton} 
@@ -982,6 +1174,31 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    fontWeight: 'bold',
+  },
+  searchContainer: {
+    marginBottom: 15,
+    marginTop: 10,
+  },
+  searchInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    color: '#2c3e50',
   },
 });
 
