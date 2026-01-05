@@ -690,19 +690,20 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
                 machineName = `makine${machineNumber}`;
               }
 
+              // Ürün adını bul
+              const productForIssue = products.find((p: any) => p.code === productCode);
+              const productName = productForIssue?.name || productCode;
+
               return (
                 <View key={issue.id} style={styles.issueCard}>
                   <View style={styles.issueHeader}>
                     <Text style={styles.issueTitle}>{machineName}</Text>
                   </View>
-                  <Text style={styles.issueProductCode}>Ürün: {productCode}</Text>
+                  <Text style={styles.issueProductCode}>Ürün: {productName}</Text>
                   <Text style={styles.issueDescription}>{issue.description || 'Açıklama yok'}</Text>
                   <Text style={styles.issueTime}>
                     Bildirilme: {formatDateTime(new Date(issue.created_at))}
                   </Text>
-                  {issue.type && (
-                    <Text style={styles.issueType}>Tip: {issue.type}</Text>
-                  )}
                 </View>
               );
                 })}

@@ -65,12 +65,21 @@ interface Issue {
   resolved_at: string | null;
 }
 
+interface BackendMachine {
+  id: number;
+  name: string;
+  machine_type: string;
+  location: string | null;
+  status: string;
+}
+
 const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'new'>('dashboard');
   
   // Dashboard state
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [backendMachines, setBackendMachines] = useState<BackendMachine[]>([]);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<number | null>(null);
   const [stages, setStages] = useState<WorkOrderStage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,8 +91,10 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [productCode, setProductCode] = useState('');
   const [lotNo, setLotNo] = useState('');
   const [qty, setQty] = useState('');
-  const [plannedStart, setPlannedStart] = useState('');
-  const [plannedEnd, setPlannedEnd] = useState('');
+  const [plannedStartDate, setPlannedStartDate] = useState('');
+  const [plannedStartTime, setPlannedStartTime] = useState('');
+  const [plannedEndDate, setPlannedEndDate] = useState('');
+  const [plannedEndTime, setPlannedEndTime] = useState('');
   const [stageCount, setStageCount] = useState('2'); // Varsayılan 2 aşama
   const [stageNames, setStageNames] = useState<string[]>([]);
   const [showStages, setShowStages] = useState(false);
@@ -94,7 +105,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [workOrderSearchQuery, setWorkOrderSearchQuery] = useState<string>(''); // İş emri arama sorgusu
   const [showWorkOrderStages, setShowWorkOrderStages] = useState<boolean>(true); // Varsayılan açık
   const [stageSearchQuery, setStageSearchQuery] = useState<string>(''); // Arama sorgusu
-  // showMachines state kaldırıldı - makineler bölümü ana ekranda
+  const [showMachineStatus, setShowMachineStatus] = useState<boolean>(false);
   
   // Products state (ürün adı göstermek için)
   const [products, setProducts] = useState<any[]>([]);
@@ -190,7 +201,9 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       // Load machines
       const machinesResponse = await machinesAPI.getMachines();
       const machinesData = machinesResponse.data || machinesResponse;
-      setMachines(Array.isArray(machinesData) ? machinesData : []);
+      const allMachines: BackendMachine[] = Array.isArray(machinesData) ? machinesData : [];
+      setMachines(allMachines);
+      setBackendMachines(allMachines);
     } catch (error: any) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -281,13 +294,23 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       return;
     }
 
-    if (!plannedStart.trim()) {
-      Alert.alert('Hata', 'Lütfen planlanan başlangıç zamanını girin!');
+    if (!plannedStartDate.trim()) {
+      Alert.alert('Hata', 'Lütfen planlanan başlangıç tarihini girin!');
       return;
     }
 
-    if (!plannedEnd.trim()) {
-      Alert.alert('Hata', 'Lütfen planlanan bitiş zamanını girin!');
+    if (!plannedStartTime.trim()) {
+      Alert.alert('Hata', 'Lütfen planlanan başlangıç saatini girin!');
+      return;
+    }
+
+    if (!plannedEndDate.trim()) {
+      Alert.alert('Hata', 'Lütfen planlanan bitiş tarihini girin!');
+      return;
+    }
+
+    if (!plannedEndTime.trim()) {
+      Alert.alert('Hata', 'Lütfen planlanan bitiş saatini girin!');
       return;
     }
 
@@ -299,22 +322,54 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
     try {
       setLoading(true);
 
-      // Parse dates - assuming format YYYY-MM-DDTHH:mm or similar
-      const startDate = new Date(plannedStart);
-      const endDate = new Date(plannedEnd);
+      // Parse dates - DD.MM.YYYY formatından Date objesine çevir
+      const parseDate = (dateStr: string, timeStr: string): Date => {
+        // DD.MM.YYYY formatını parse et
+        const parts = dateStr.trim().split('.');
+        if (parts.length !== 3) {
+          throw new Error('Geçersiz tarih formatı! DD.MM.YYYY formatında olmalı.');
+        }
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+        const year = parseInt(parts[2], 10);
 
-      if (isNaN(startDate.getTime())) {
-        Alert.alert('Hata', 'Geçersiz başlangıç tarihi formatı!');
+        // HH:mm formatını parse et
+        const timeParts = timeStr.trim().split(':');
+        if (timeParts.length !== 2) {
+          throw new Error('Geçersiz saat formatı! HH:mm formatında olmalı.');
+        }
+        const hours = parseInt(timeParts[0], 10);
+        const minutes = parseInt(timeParts[1], 10);
+
+        const date = new Date(year, month, day, hours, minutes);
+        if (isNaN(date.getTime())) {
+          throw new Error('Geçersiz tarih/saat!');
+        }
+        return date;
+      };
+
+      let startDate: Date;
+      let endDate: Date;
+      
+      try {
+        startDate = parseDate(plannedStartDate, plannedStartTime);
+      } catch (error: any) {
+        Alert.alert('Hata', error.message || 'Geçersiz başlangıç tarihi/saat formatı!');
+        setLoading(false);
         return;
       }
 
-      if (isNaN(endDate.getTime())) {
-        Alert.alert('Hata', 'Geçersiz bitiş tarihi formatı!');
+      try {
+        endDate = parseDate(plannedEndDate, plannedEndTime);
+      } catch (error: any) {
+        Alert.alert('Hata', error.message || 'Geçersiz bitiş tarihi/saat formatı!');
+        setLoading(false);
         return;
       }
 
       if (endDate <= startDate) {
         Alert.alert('Hata', 'Bitiş tarihi başlangıç tarihinden sonra olmalıdır!');
+        setLoading(false);
         return;
       }
 
@@ -344,8 +399,10 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           setProductSearchQuery('');
           setLotNo('');
           setQty('');
-          setPlannedStart('');
-          setPlannedEnd('');
+          setPlannedStartDate('');
+          setPlannedStartTime('');
+          setPlannedEndDate('');
+          setPlannedEndTime('');
           setStageCount('2');
           setStageNames([]);
           setShowStages(false);
@@ -412,7 +469,8 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         }
       >
         <View style={styles.userInfo}>
-          <Text style={styles.welcomeText}>Planlayıcı: {user.name}</Text>
+          <Text style={styles.userName}>👤 {user.name}</Text>
+          <Text style={styles.userRole}>Planlayıcı</Text>
         </View>
 
         {/* Sorun Bildirimleri */}
@@ -466,19 +524,20 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                 machineName = `makine${machineNumber}`;
               }
 
+              // Ürün adını bul
+              const productForIssue = products.find((p: any) => p.code === productCode);
+              const productName = productForIssue?.name || productCode;
+
               return (
                 <View key={issue.id} style={styles.issueCard}>
                   <View style={styles.issueHeader}>
                     <Text style={styles.issueTitle}>{machineName}</Text>
                   </View>
-                  <Text style={styles.issueProductCode}>Ürün: {productCode}</Text>
+                  <Text style={styles.issueProductCode}>Ürün: {productName}</Text>
                   <Text style={styles.issueDescription}>{issue.description || 'Açıklama yok'}</Text>
                   <Text style={styles.issueTime}>
                     Bildirilme: {formatDate(issue.created_at)}
                   </Text>
-                  {issue.type && (
-                    <Text style={styles.issueType}>Tip: {issue.type}</Text>
-                  )}
                 </View>
               );
                 })}
@@ -550,14 +609,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                     >
                       <View style={styles.workOrderHeader}>
                         <Text style={styles.workOrderId}>İş Emri #{wo.id}</Text>
-                        <View
-                          style={[
-                            styles.statusBadge,
-                            { backgroundColor: '#3498db' }
-                          ]}
-                        >
-                          <Text style={styles.statusText}>Aktif</Text>
-                        </View>
                       </View>
                       <Text style={styles.workOrderDetail}>Ürün: {products.find((p: any) => p.code === wo.product_code)?.name || wo.product_code}</Text>
                       <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
@@ -668,6 +719,104 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           </View>
         )}
 
+        {/* Makine Durumu */}
+        <View style={styles.dashboardCard}>
+          <TouchableOpacity 
+            style={styles.sectionHeader}
+            onPress={() => setShowMachineStatus(!showMachineStatus)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.cardTitle}>🏭 Makine Durumu</Text>
+            <Text style={styles.expandIcon}>
+              {showMachineStatus ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          
+          {showMachineStatus && (
+            <>
+              {(() => {
+                // Tüm makineleri göster
+                if (backendMachines.length === 0) {
+                  return <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>;
+                }
+                
+                // Aktif work orders'daki makineleri bul
+                const machineIdToWorkOrder = new Map<number, WorkOrder>();
+                activeWorkOrders.forEach(wo => {
+                  if (wo.machine_id) {
+                    machineIdToWorkOrder.set(wo.machine_id, wo);
+                  }
+                });
+                
+                // Tüm makineleri göster
+                return backendMachines.map((machine) => {
+                  const workOrder = machineIdToWorkOrder.get(machine.id);
+                  const isRunning = workOrder !== undefined;
+                  
+                  // Makinenin kendi durumuna göre durum belirle
+                  let statusText = '';
+                  let statusColor = '#95a5a6'; // Varsayılan gri
+                  
+                  if (machine.status === 'maintenance') {
+                    // Makine arızalı
+                    statusText = 'Arızalı';
+                    statusColor = '#e74c3c'; // Kırmızı
+                  } else if (machine.status === 'inactive') {
+                    // Makine pasif
+                    statusText = 'Pasif';
+                    statusColor = '#95a5a6'; // Gri
+                  } else if (machine.status === 'active') {
+                    // Makine aktif - üretim durumuna göre
+                    if (isRunning) {
+                      statusText = 'Çalışıyor';
+                      statusColor = '#27ae60'; // Yeşil
+                    } else {
+                      statusText = 'Boşta';
+                      statusColor = '#3498db'; // Mavi
+                    }
+                  } else {
+                    statusText = 'Bilinmeyen';
+                    statusColor = '#95a5a6';
+                  }
+                  
+                  // Ürün adını bul
+                  let productName = '';
+                  if (workOrder) {
+                    const product = products.find((p: any) => p.code === workOrder.product_code);
+                    productName = product?.name || workOrder.product_code;
+                  }
+                  
+                  return (
+                    <View key={machine.id} style={styles.machineItem}>
+                      <View style={styles.machineHeader}>
+                        <View>
+                          <Text style={styles.machineName}>{machine.name}</Text>
+                          {machine.location && (
+                            <Text style={styles.machineLocation}>{machine.location}</Text>
+                          )}
+                        </View>
+                        <View style={[
+                          styles.statusBadge,
+                          { backgroundColor: statusColor }
+                        ]}>
+                          <Text style={styles.statusBadgeText}>
+                            {statusText}
+                          </Text>
+                        </View>
+                      </View>
+                      {workOrder && productName && (
+                        <Text style={styles.machineProductionInfo}>
+                          Ürün: {productName}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                });
+              })()}
+            </>
+          )}
+        </View>
+
       </ScrollView>
     );
   };
@@ -747,9 +896,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                 </ScrollView>
               )}
             </View>
-            <Text style={styles.hintText}>
-              Ürün adı veya kodu yazarak arayın veya listeden seçin.
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -764,29 +910,47 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Planlanan Başlangıç Zamanı *</Text>
+            <Text style={styles.label}>Planlanan Başlangıç Tarihi *</Text>
             <TextInput
               style={styles.input}
-              value={plannedStart}
-              onChangeText={setPlannedStart}
-              placeholder="YYYY-MM-DDTHH:mm (örn: 2024-01-15T08:00)"
+              value={plannedStartDate}
+              onChangeText={setPlannedStartDate}
+              placeholder="GG.AA.YYYY"
+              keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Format: YYYY-MM-DDTHH:mm (örn: 2024-01-15T08:00)
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Planlanan Bitiş Zamanı *</Text>
+            <Text style={styles.label}>Planlanan Başlangıç Saati *</Text>
             <TextInput
               style={styles.input}
-              value={plannedEnd}
-              onChangeText={setPlannedEnd}
-              placeholder="YYYY-MM-DDTHH:mm (örn: 2024-01-15T18:00)"
+              value={plannedStartTime}
+              onChangeText={setPlannedStartTime}
+              placeholder="SS:DD"
+              keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Format: YYYY-MM-DDTHH:mm (örn: 2024-01-15T18:00)
-            </Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Planlanan Bitiş Tarihi *</Text>
+            <TextInput
+              style={styles.input}
+              value={plannedEndDate}
+              onChangeText={setPlannedEndDate}
+              placeholder="GG.AA.YYYY"
+              keyboardType="numeric"
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Planlanan Bitiş Saati *</Text>
+            <TextInput
+              style={styles.input}
+              value={plannedEndTime}
+              onChangeText={setPlannedEndTime}
+              placeholder="SS:DD"
+              keyboardType="numeric"
+            />
           </View>
 
           <View style={styles.inputContainer}>
@@ -798,9 +962,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
               placeholder="Örn: 2"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Oluşturulacak üretim aşaması sayısı (örn: 2, 3, 4...)
-            </Text>
           </View>
 
           {/* Aşama İsimleri */}
@@ -813,14 +974,10 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                     style={styles.input}
                     value={name}
                     onChangeText={(text) => handleStageNameChange(index, text)}
-                    placeholder={`Aşama ${index + 1} - Ne yapılacak? (örn: Enjeksiyon, Montaj, Kontrol)`}
+                    placeholder={`Aşama ${index + 1} (örn: Enjeksiyon, Montaj, Kontrol)`}
                   />
                 </View>
               ))}
-              <Text style={styles.hintText}>
-                Her aşama için başlık yazın (örn: "Enjeksiyon", "Montaj", "Kontrol"). 
-                Boş bırakırsanız otomatik isimler oluşturulur.
-              </Text>
             </View>
           )}
 
@@ -830,17 +987,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           >
             <Text style={styles.createButtonText}>İŞ EMRİ OLUŞTUR</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Bilgi Kartı */}
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>ℹ️ Bilgi</Text>
-          <Text style={styles.infoText}>
-            • İş emri oluşturulduğunda belirttiğiniz sayıda aşama otomatik olarak oluşturulur.
-          </Text>
-          <Text style={styles.infoText}>
-            • İş emirlerini Dashboard sekmesinden görüntüleyebilir ve aşamaları başlatabilirsiniz.
-          </Text>
         </View>
       </ScrollView>
     );
@@ -864,7 +1010,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           onPress={() => setActiveTab('dashboard')}
         >
           <Text style={[styles.tabText, activeTab === 'dashboard' && styles.tabTextActive]}>
-            📊 Dashboard
+            📊 İş Emirleri
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -950,6 +1096,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
+  },
+  userName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  userRole: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    fontWeight: '500',
   },
   dashboardCard: {
     backgroundColor: 'white',
@@ -1071,6 +1228,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#2c3e50',
+  },
+  machineLocation: {
+    fontSize: 13,
+    color: '#95a5a6',
+    marginTop: 2,
+  },
+  machineProductionInfo: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginTop: 8,
+  },
+  statusBadgeText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   machineDetail: {
     fontSize: 14,
