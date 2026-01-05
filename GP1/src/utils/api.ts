@@ -792,3 +792,65 @@ export const issuesAPI = {
     }
   },
 };
+
+/**
+ * Reçete API (AI Tahmin)
+ */
+export const receteAPI = {
+  /**
+   * Ürün adına göre reçete bilgilerini getirir
+   * Kayıtlı ürün için gerçek değerler, kayıtlı değilse hata döner
+   */
+  async getRecete(urunAdi: string) {
+    try {
+      const response = await apiClient.post('/api/recete', { urun_adi: urunAdi });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting recete:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Reçete alınamadı');
+    }
+  },
+
+  /**
+   * Malzeme bazlı AI tahmini yapar (yeni ürünler için)
+   */
+  async getMalzemeTahmin(malzeme: string, parcaAgirligiG: number, gozAdedi: number) {
+    try {
+      const response = await apiClient.post('/api/ai/tahmin', {
+        malzeme: malzeme,
+        parca_agirligi_g: parcaAgirligiG,
+        goz_adedi: gozAdedi,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting AI tahmin:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'AI tahmini alınamadı');
+    }
+  },
+
+  /**
+   * Mevcut malzemeleri listeler
+   */
+  async getMalzemeler() {
+    try {
+      const response = await apiClient.get('/api/ai/malzemeler');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting malzemeler:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Malzemeler alınamadı');
+    }
+  },
+
+  /**
+   * Tüm ürünleri listeler
+   */
+  async getUrunler() {
+    try {
+      const response = await apiClient.get('/api/urunler');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting urunler:', error);
+      throw new Error(error.response?.data?.detail || error.message || 'Ürünler alınamadı');
+    }
+  },
+};

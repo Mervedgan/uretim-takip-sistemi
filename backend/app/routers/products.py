@@ -4,7 +4,7 @@ from typing import List
 from datetime import datetime, timezone
 from app.db import get_db
 from app.models import Product
-from app.schemas import ProductCreate, ProductUpdate, ProductResponse
+from app.schemas import ProductCreate, ProductUpdate, ProductResponse, ProductUpsert
 from app.routers.auth import get_current_user, require_roles
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -91,6 +91,108 @@ def create_product(
     db.refresh(product)
     
     return product
+
+
+# ---------------------------------------------------------
+# ✅ Ürün Upsert: Varsa güncelle, yoksa ekle (AI eğitimi için)
+# ---------------------------------------------------------
+@router.post("/upsert")
+def upsert_product(
+    product_data: ProductUpsert,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_roles("planner", "admin", "worker"))
+):
+    """
+    Ürün ekleme veya güncelleme (Upsert).
+    
+    - **Ürün adı varsa:** Mevcut ürünü günceller
+    - **Ürün adı yoksa:** Yeni ürün oluşturur
+    
+    Bu endpoint AI modeli eğitimi için idealdir.
+    `auto_train: true` gönderilirse güncelleme sonrası model otomatik eğitilir.
+    
+    **Yetki:** "planner", "admin" veya "worker" rolü
+    """
+    # Ürün adına göre ara (büyük/küçük harf duyarsız)
+    existing = db.query(Product).filter(
+        Product.name.ilike(product_data.name),
+        Product.deleted_at.is_(None)
+    ).first()
+    
+    is_new = False
+    
+    if existing:
+        # Güncelle
+        if product_data.description is not None:
+            existing.description = product_data.description
+        if product_data.cavity_count is not None:
+            existing.cavity_count = product_data.cavity_count
+        if product_data.cycle_time_sec is not None:
+            existing.cycle_time_sec = product_data.cycle_time_sec
+        if product_data.injection_temp_c is not None:
+            existing.injection_temp_c = product_data.injection_temp_c
+        if product_data.mold_temp_c is not None:
+            existing.mold_temp_c = product_data.mold_temp_c
+        if product_data.material is not None:
+            existing.material = product_data.material
+        if product_data.part_weight_g is not None:
+            existing.part_weight_g = product_data.part_weight_g
+        if product_data.hourly_production is not None:
+            existing.hourly_production = product_data.hourly_production
+        
+        existing.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing)
+        product = existing
+    else:
+        # Yeni oluştur
+        is_new = True
+        code = product_data.code or f"PRD-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        
+        # Kod benzersiz mi kontrol et
+        code_exists = db.query(Product).filter(Product.code == code).first()
+        if code_exists:
+            code = f"{code}-{datetime.now(timezone.utc).strftime('%f')[:4]}"
+        
+        product = Product(
+            code=code,
+            name=product_data.name,
+            description=product_data.description,
+            cavity_count=product_data.cavity_count,
+            cycle_time_sec=product_data.cycle_time_sec,
+            injection_temp_c=product_data.injection_temp_c,
+            mold_temp_c=product_data.mold_temp_c,
+            material=product_data.material,
+            part_weight_g=product_data.part_weight_g,
+            hourly_production=product_data.hourly_production,
+        )
+        db.add(product)
+        db.commit()
+        db.refresh(product)
+    
+    # Otomatik AI eğitimi
+    train_result = None
+    if product_data.auto_train:
+        try:
+            from app.ai_model import ai_model
+            train_result = ai_model.model_egit(db)
+        except Exception as e:
+            train_result = {"success": False, "message": str(e)}
+    
+    return {
+        "ok": True,
+        "action": "created" if is_new else "updated",
+        "product": {
+            "id": product.id,
+            "code": product.code,
+            "name": product.name,
+            "injection_temp_c": product.injection_temp_c,
+            "mold_temp_c": product.mold_temp_c,
+            "cycle_time_sec": product.cycle_time_sec,
+            "material": product.material,
+        },
+        "ai_training": train_result
+    }
 
 
 # ---------------------------------------------------------

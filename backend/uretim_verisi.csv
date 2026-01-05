@@ -1,0 +1,51 @@
+﻿No,Kalıp Adı,Ürün Adı,Göz Adedi,Çevrim Süresi ,Enjeksiyon Sıcaklığı,Kalıp Sıcaklığı ,Malzeme,Parça Ağırlığı (g),Saatlik Üretim (adet)
+1,KP-01,Elektrik Prizi,2,28,220,45,ABS,35,257
+2,KP-02,Şişe Kapağı,8,15,200,30,PP,6,1920
+3,KP-03,Otomotiv Klipsi,4,22,210,40,PA6,12,654
+4,KP-04,Anahtar Gövdesi,2,30,230,50,ABS,40,240
+5,KP-05,Medikal Kapak,16,18,190,28,PP,4,3200
+6,KP-06,Kablo Bağı,6,20,215,35,PA66,8,1080
+7,KP-07,Oyuncak Parça,1,35,225,55,PS,55,103
+8,KP-08,Şırınga Gövdesi,4,24,200,32,PP,10,600
+9,KP-09,Beyaz Eşya Parçası,2,40,240,60,ABS,90,180
+10,KP-10,Düğme,12,14,195,30,PP,3,3085
+11,KP-11,Elektronik Kutu,1,45,235,65,ABS,120,80
+12,KP-12,Otomotiv Kapak,2,34,230,55,PA6 GF30,75,212
+13,KP-13,Kalem Gövdesi,4,19,205,35,PP,9,758
+14,KP-14,Sensör Yuvası,1,38,240,60,PBT,65,95
+15,KP-15,Vida Başlığı,16,16,200,30,PP,2,05,3600
+16,KP-16,Tıbbi Aparat,2,26,210,42,PC,30,277
+17,KP-17,Kutu Kapağı,4,28,220,45,ABS,25,514
+18,KP-18,Endüstriyel Klips,6,23,215,40,PA6,14,939
+19,KP-19,Elektrik Soketi,2,32,225,50,PBT GF20,45,225
+20,KP-20,Medikal Muhafaza,1,50,235,70,PC,150,72
+21,KP-21,Pompa Gövdesi,1,55,245,75,ABS,180,65
+22,KP-22,Kapak Contası,8,18,190,30,TPE,5,1600
+23,KP-23,Otomotiv Braketi,2,36,230,55,PA6 GF30,95,200
+24,KP-24,Elektrik Düğmesi,6,21,205,35,PP,7,1028
+25,KP-25,Medikal Kelepçe,4,25,210,40,PP,11,576
+26,KP-26,Fan Kanadı,1,48,240,65,ABS,130,75
+27,KP-27,Sensör Kapağı,2,29,220,48,PBT,42,248
+28,KP-28,Kablo Tutucu,8,17,200,32,PA6,6,1694
+29,KP-29,Sigorta Yuvası,4,27,215,45,ABS,22,533
+30,KP-30,Şarj Soketi,2,33,225,50,PA66,38,218
+31,KP-31,Elektronik Çerçeve,1,42,235,60,PC,110,86
+32,KP-32,Dişli Muhafaza,2,31,220,48,POM,28,232
+33,KP-33,Klavye Tuşu,12,13,195,28,ABS,2,3323
+34,KP-34,Medikal Kartuş,1,46,240,68,PP,140,78
+35,KP-35,Otomotiv Izgara,1,60,250,80,PA6 GF30,220,60
+36,KP-36,LED Muhafaza,4,24,210,40,PC,18,600
+37,KP-37,Elektrik Klemensi,6,20,205,35,PA66,9,1080
+38,KP-38,Şişe Gövdesi,2,37,225,55,PET,85,194
+39,KP-39,Kapak Mandalı,8,19,200,32,PP,4,05,1516
+40,KP-40,Tıbbi Kap,1,52,235,72,PC,160,69
+41,KP-41,Elektrik İzolatörü,2,35,230,55,PBT GF30,60,206
+42,KP-42,Oyuncak Tekerlek,4,26,215,42,PP,20,554
+43,KP-43,Kasa Ayağı,6,22,210,38,ABS,13,981
+44,KP-44,Medikal Tutucu,2,28,220,45,PP,27,257
+45,KP-45,Elektrik Panel Parçası,1,58,245,78,PC,200,62
+46,KP-46,Otomotiv Klips Büyük,4,23,215,40,PA6,18,626
+47,KP-47,Sensör Braketi,2,34,225,52,ABS,50,212
+48,KP-48,Kapak Pimi,12,15,195,30,PP,3,02,2880
+49,KP-49,Endüstriyel Kapak,1,49,240,70,ABS,155,73
+50,KP-50,Medikal Gövde,1,54,235,75,PC,175,66

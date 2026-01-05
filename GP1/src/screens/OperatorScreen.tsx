@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { User, ProductionRecord, ProductionStage } from '../types';
 import { productionStore } from '../data/productionStore';
-import { workOrdersAPI, machinesAPI, stagesAPI, metricsAPI, productsAPI, moldsAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, stagesAPI, metricsAPI, productsAPI, moldsAPI, receteAPI } from '../utils/api';
 
 interface OperatorScreenProps {
   user: User;
@@ -110,6 +110,15 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
   const [partWeight, setPartWeight] = useState('');
   const [hourlyProduction, setHourlyProduction] = useState('');
   const [cavityCount, setCavityCount] = useState('');
+  
+  // Reçete state'leri
+  const [recete, setRecete] = useState<any>(null);
+  const [receteLoading, setReceteLoading] = useState(false);
+  const [urunKayitli, setUrunKayitli] = useState<boolean | null>(null);
+  const [malzemeler, setMalzemeler] = useState<string[]>([]);
+  const [selectedMalzeme, setSelectedMalzeme] = useState('');
+  const [tahminAgirlik, setTahminAgirlik] = useState('');
+  const [tahminGozAdedi, setTahminGozAdedi] = useState('');
 
   // Load products and machines when new production tab is active
   useEffect(() => {
@@ -201,6 +210,101 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
     } catch (error: any) {
       console.error('Error loading molds:', error);
       setMolds([]);
+    }
+  };
+
+  // Ürün adına göre reçete bilgilerini yükle
+  const loadRecete = async (urunAdi: string) => {
+    if (!urunAdi.trim()) {
+      setRecete(null);
+      setUrunKayitli(null);
+      return;
+    }
+
+    try {
+      setReceteLoading(true);
+      const response = await receteAPI.getRecete(urunAdi);
+      
+      if (response.success && response.kaynak === 'veritabani') {
+        // Kayıtlı ürün - gerçek değerleri göster
+        setRecete(response);
+        setUrunKayitli(true);
+        
+        // Form alanlarını otomatik doldur
+        if (response.degerler) {
+          setCycleTime(response.degerler.cevrim_suresi?.toString() || '');
+          setInjectionTemp(response.degerler.enjeksiyon_sicakligi?.toString() || '');
+          setMoldTemp(response.degerler.kalip_sicakligi?.toString() || '');
+        }
+        if (response.malzeme) {
+          setMaterial(response.malzeme);
+        }
+      } else {
+        // Kayıtlı değil - malzeme formu göster
+        setRecete(response);
+        setUrunKayitli(false);
+        // Malzemeleri yükle
+        loadMalzemeler();
+      }
+    } catch (error: any) {
+      console.error('Error loading recete:', error);
+      setRecete(null);
+      setUrunKayitli(false);
+      loadMalzemeler();
+    } finally {
+      setReceteLoading(false);
+    }
+  };
+
+  // Malzemeleri yükle
+  const loadMalzemeler = async () => {
+    try {
+      const response = await receteAPI.getMalzemeler();
+      if (response.success && response.malzemeler) {
+        setMalzemeler(response.malzemeler);
+      }
+    } catch (error: any) {
+      console.error('Error loading malzemeler:', error);
+    }
+  };
+
+  // Malzeme bazlı AI tahmini yap
+  const handleAITahmin = async () => {
+    if (!selectedMalzeme || !tahminAgirlik || !tahminGozAdedi) {
+      Alert.alert('Hata', 'Lütfen tüm alanları doldurun!');
+      return;
+    }
+
+    try {
+      setReceteLoading(true);
+      const response = await receteAPI.getMalzemeTahmin(
+        selectedMalzeme,
+        parseFloat(tahminAgirlik),
+        parseInt(tahminGozAdedi)
+      );
+
+      if (response.success) {
+        setRecete({
+          ...response,
+          kaynak: 'ai_tahmin',
+        });
+        
+        // Form alanlarını doldur
+        if (response.degerler) {
+          setCycleTime(response.degerler.cevrim_suresi?.toString() || '');
+          setInjectionTemp(response.degerler.enjeksiyon_sicakligi?.toString() || '');
+          setMoldTemp(response.degerler.kalip_sicakligi?.toString() || '');
+        }
+        setMaterial(selectedMalzeme);
+        setPartWeight(tahminAgirlik);
+        setCavityCount(tahminGozAdedi);
+      } else {
+        Alert.alert('Hata', response.message || 'Tahmin yapılamadı');
+      }
+    } catch (error: any) {
+      Alert.alert('Hata', error.message || 'Tahmin yapılamadı');
+    } finally {
+      setReceteLoading(false);
     }
   };
 
@@ -387,16 +491,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
 
   const handleStartProduction = async () => {
     // Validasyonlar
-    if (!productCode.trim()) {
-      Alert.alert('Hata', 'Lütfen ürün kodu girin!');
-      return;
-    }
-
-    if (!lotNo.trim()) {
-      Alert.alert('Hata', 'Lütfen lot numarası girin!');
-      return;
-    }
-
     if (!targetCount.trim() || isNaN(parseInt(targetCount)) || parseInt(targetCount) <= 0) {
       Alert.alert('Hata', 'Lütfen geçerli bir hedef miktar girin!');
       return;
@@ -411,45 +505,22 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
     try {
       setLoading(true);
 
-      // Ürün kodunun database'de olup olmadığını kontrol et
-      const trimmedProductCode = productCode.trim();
-      let productExists = false;
-      
-      try {
-        const allProducts = await productsAPI.getProducts();
-        const productArray = Array.isArray(allProducts) ? allProducts : [];
-        productExists = productArray.some((p: any) => 
-          p.code && p.code.toLowerCase() === trimmedProductCode.toLowerCase()
-        );
-      } catch (error) {
-        console.error('Error checking products:', error);
-        // Hata olsa bile devam et, belki ürün zaten var
-      }
+      const now = new Date();
+      let finalProductCode = productCode.trim();
+      const autoLotNo = `LOT-${now.toISOString().slice(0,10)}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
 
-      // Eğer ürün database'de yoksa, yeni ürün oluştur
-      if (!productExists) {
-        try {
-          const productNameToUse = productName.trim() || trimmedProductCode;
-          console.log('📦 Yeni ürün oluşturuluyor:', { code: trimmedProductCode, name: productNameToUse });
-          await productsAPI.createProduct({
-            code: trimmedProductCode,
-            name: productNameToUse,
-            description: `Otomatik oluşturuldu - ${new Date().toLocaleString('tr-TR')}`
-          });
-          console.log('✅ Yeni ürün oluşturuldu:', trimmedProductCode);
-          
-          // Ürün listesini yenile
-          await loadProducts();
-        } catch (productError: any) {
-          console.error('Ürün oluşturma hatası:', productError);
-          // Ürün oluşturulamazsa kullanıcıya bilgi ver ama devam et
-          const errorMessage = productError.response?.data?.detail || productError.message || 'Bilinmeyen hata';
-          console.warn('⚠️ Ürün oluşturulamadı, work order oluşturulmaya devam ediliyor:', errorMessage);
-        }
+      // Eğer kullanıcı ürün seçmediyse, uyarı ver
+      if (!finalProductCode) {
+        Alert.alert(
+          'Ürün Seçilmedi',
+          'Üretim başlatmak için bir ürün seçmelisiniz. Lütfen arama kutusundan bir ürün seçin veya adını yazıp sorgulayın.',
+          [{ text: 'Tamam' }]
+        );
+        setLoading(false);
+        return;
       }
 
       // Tarih hesaplamaları - şimdi başla, 4 saat sonra bitir (varsayılan)
-      const now = new Date();
       const endTime = new Date(now.getTime() + 4 * 60 * 60 * 1000); // 4 saat sonra
 
       // Backend'e work order oluştur
@@ -460,8 +531,8 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       }
 
       const workOrderData = {
-        product_code: trimmedProductCode,
-        lot_no: lotNo.trim(),
+        product_code: finalProductCode,
+        lot_no: autoLotNo,
         qty: parseInt(targetCount),
         planned_start: now.toISOString(),
         planned_end: endTime.toISOString(),
@@ -502,7 +573,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       setProductCode('');
       setProductName('');
       setProductId(null);
-      setLotNo('');
       setTargetCount('');
       setCycleTime('');
       setMachineId('');
@@ -928,106 +998,240 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Yeni Üretim Başlat</Text>
 
+          {/* Mevcut Ürünler - Açılır Liste */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Ürün Kodu *</Text>
-            <TextInput
-              style={styles.input}
-              value={productCode}
-              onChangeText={setProductCode}
-              placeholder="Örn: PRD-001, PRD-002..."
-            />
-            <Text style={styles.hintText}>
-              Database'de kayıtlı ürün kodunu girin
-            </Text>
-            
-            {/* Mevcut Ürünler - Açılır Liste */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Mevcut Ürünler</Text>
-              <View style={styles.productsListContainer}>
-                {/* Arama Çubuğu - Açılır/Kapanır */}
-                <View style={styles.productSearchContainer}>
-                  <TextInput
-                    style={styles.productSearchInput}
-                    placeholder="Ürün adı veya kodu ile ara..."
-                    placeholderTextColor="#95a5a6"
-                    value={productSearchQuery}
-                    onChangeText={setProductSearchQuery}
-                    onFocus={() => setShowProductsList(true)}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity
-                    style={styles.productSearchIcon}
-                    onPress={() => setShowProductsList(!showProductsList)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.expandIcon}>
-                      {showProductsList ? '▼' : '▶'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              
-              {showProductsList && (
-                <>
-                  
-                  <ScrollView style={styles.productsListScroll} nestedScrollEnabled={true}>
-                    {(() => {
-                      // Arama sorgusuna göre filtrele
-                      const filteredProducts = productSearchQuery.trim() === '' 
-                        ? products 
-                        : products.filter(product => 
-                            product.code.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                            product.name.toLowerCase().includes(productSearchQuery.toLowerCase())
-                          );
-                      
-                      if (filteredProducts.length === 0) {
-                        return (
-                          <Text style={styles.hintText}>
-                            {productSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Ürün bulunamadı. Lütfen backend\'den ürün ekleyin.'}
-                          </Text>
-                        );
-                      }
-                      
-                      return filteredProducts.map((product) => (
-                        <TouchableOpacity
-                          key={product.id}
-                          style={styles.productItem}
-                          onPress={async () => {
-                            setProductCode(product.code);
-                            setProductName(product.name);
-                            setProductId(product.id);
-                            // Ürüne ait mold'ları yükle
-                            await loadMoldsForProduct(product.id);
-                            // Arama sorgusunu temizle ve listeyi kapat
-                            setProductSearchQuery('');
-                            setShowProductsList(false);
-                          }}
-                        >
-                          <Text style={styles.productItemText}>
-                            {product.code} - {product.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ));
-                    })()}
-                  </ScrollView>
-                </>
-              )}
+            <Text style={styles.label}>Ürün Ara / Seç</Text>
+            <View style={styles.productsListContainer}>
+              {/* Arama Çubuğu - Sorgula Butonu ile */}
+              <View style={styles.productSearchContainer}>
+                <TextInput
+                  style={styles.productSearchInputWithButton}
+                  placeholder="Ürün adı girin..."
+                  placeholderTextColor="#95a5a6"
+                  value={productSearchQuery}
+                  onChangeText={(text) => {
+                    setProductSearchQuery(text);
+                    // Eğer metin değişirse önceki reçete sonuçlarını temizle
+                    if (text.trim() === '') {
+                      setRecete(null);
+                      setUrunKayitli(null);
+                    }
+                  }}
+                  onFocus={() => setShowProductsList(true)}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.sorgulaButton}
+                  onPress={async () => {
+                    const query = productSearchQuery.trim();
+                    if (!query) {
+                      Alert.alert('Uyarı', 'Lütfen ürün adı girin!');
+                      return;
+                    }
+                    
+                    // Önce listede ara
+                    const foundProduct = products.find(
+                      (p: any) => 
+                        p.name.toLowerCase() === query.toLowerCase() ||
+                        p.code.toLowerCase() === query.toLowerCase()
+                    );
+                    
+                    if (foundProduct) {
+                      // Listede bulundu - seç ve reçete yükle
+                      setProductCode(foundProduct.code);
+                      setProductName(foundProduct.name);
+                      setProductId(foundProduct.id);
+                      await loadMoldsForProduct(foundProduct.id);
+                      await loadRecete(foundProduct.name);
+                      setShowProductsList(false);
+                    } else {
+                      // Listede yok - API'den reçete sorgula
+                      setProductCode('');
+                      setProductName(query);
+                      setProductId(null);
+                      await loadRecete(query);
+                      setShowProductsList(false);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.sorgulaButtonText}>SORGULA</Text>
+                </TouchableOpacity>
               </View>
+              
+              {/* Liste Aç/Kapat Butonu */}
+              <TouchableOpacity
+                style={styles.listToggleButton}
+                onPress={() => setShowProductsList(!showProductsList)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.listToggleText}>
+                  {showProductsList ? '▲ Listeyi Kapat' : '▼ Kayıtlı Ürünleri Göster'}
+                </Text>
+              </TouchableOpacity>
+            
+              {showProductsList && (
+                <ScrollView style={styles.productsListScroll} nestedScrollEnabled={true}>
+                  {(() => {
+                    // Arama sorgusuna göre filtrele
+                    const filteredProducts = productSearchQuery.trim() === '' 
+                      ? products 
+                      : products.filter(product => 
+                          product.code.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                          product.name.toLowerCase().includes(productSearchQuery.toLowerCase())
+                        );
+                    
+                    if (filteredProducts.length === 0) {
+                      return (
+                        <Text style={styles.hintText}>
+                          {productSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Ürün bulunamadı. Lütfen backend\'den ürün ekleyin.'}
+                        </Text>
+                      );
+                    }
+                    
+                    return filteredProducts.map((product) => (
+                      <TouchableOpacity
+                        key={product.id}
+                        style={styles.productItem}
+                        onPress={async () => {
+                          setProductCode(product.code);
+                          setProductName(product.name);
+                          setProductId(product.id);
+                          // Ürüne ait mold'ları yükle
+                          await loadMoldsForProduct(product.id);
+                          // Reçete bilgilerini yükle
+                          await loadRecete(product.name);
+                          // Arama sorgusunu temizle ve listeyi kapat
+                          setProductSearchQuery('');
+                          setShowProductsList(false);
+                        }}
+                      >
+                        <Text style={styles.productItemText}>
+                          {product.code} - {product.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ));
+                  })()}
+                </ScrollView>
+              )}
             </View>
+            <Text style={styles.hintText}>
+              Ürün adı yazıp SORGULA butonuna basın. Kayıtlıysa bilgileri, değilse tahmin formu gösterilir.
+            </Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Lot Numarası *</Text>
-            <TextInput
-              style={styles.input}
-              value={lotNo}
-              onChangeText={setLotNo}
-              placeholder="Örn: LOT-001, LOT-2024-01..."
-            />
-            <Text style={styles.hintText}>
-              Bu üretim için lot numarası girin
-            </Text>
-          </View>
+          {/* Reçete Bilgileri - Ürün seçildiğinde göster */}
+          {receteLoading && (
+            <View style={styles.receteCard}>
+              <ActivityIndicator size="small" color="#3498db" />
+              <Text style={styles.receteLoadingText}>Reçete yükleniyor...</Text>
+            </View>
+          )}
+
+          {!receteLoading && recete && urunKayitli && recete.degerler && (
+            <View style={styles.receteCard}>
+              <Text style={styles.receteTitle}>📋 REÇETE BİLGİLERİ</Text>
+              <View style={styles.receteRow}>
+                <Text style={styles.receteLabel}>Enjeksiyon Sıcaklığı:</Text>
+                <Text style={styles.receteValue}>{recete.degerler.enjeksiyon_sicakligi}°C</Text>
+              </View>
+              <View style={styles.receteRow}>
+                <Text style={styles.receteLabel}>Kalıp Sıcaklığı:</Text>
+                <Text style={styles.receteValue}>{recete.degerler.kalip_sicakligi}°C</Text>
+              </View>
+              <View style={styles.receteRow}>
+                <Text style={styles.receteLabel}>Çevrim Süresi:</Text>
+                <Text style={styles.receteValue}>{recete.degerler.cevrim_suresi} sn</Text>
+              </View>
+              {recete.malzeme && recete.malzeme !== 'string' && (
+                <View style={styles.receteRow}>
+                  <Text style={styles.receteLabel}>Malzeme:</Text>
+                  <Text style={styles.receteValue}>{recete.malzeme}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {!receteLoading && urunKayitli === false && (
+            <View style={styles.tahminCard}>
+              <Text style={styles.tahminTitle}>⚠️ Bu ürün kayıtlı değil</Text>
+              <Text style={styles.tahminSubtitle}>Tahmin için bilgi girin:</Text>
+              
+              {/* Malzeme Seçimi */}
+              <View style={styles.tahminInputContainer}>
+                <Text style={styles.tahminLabel}>Malzeme *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.malzemeScroll}>
+                  {malzemeler.map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[
+                        styles.malzemeChip,
+                        selectedMalzeme === m && styles.malzemeChipSelected
+                      ]}
+                      onPress={() => setSelectedMalzeme(m)}
+                    >
+                      <Text style={[
+                        styles.malzemeChipText,
+                        selectedMalzeme === m && styles.malzemeChipTextSelected
+                      ]}>{m}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Ağırlık */}
+              <View style={styles.tahminInputContainer}>
+                <Text style={styles.tahminLabel}>Parça Ağırlığı (g) *</Text>
+                <TextInput
+                  style={styles.tahminInput}
+                  value={tahminAgirlik}
+                  onChangeText={setTahminAgirlik}
+                  placeholder="Örn: 10"
+                  keyboardType="numeric"
+                />
+              </View>
+
+              {/* Göz Adedi */}
+              <View style={styles.tahminInputContainer}>
+                <Text style={styles.tahminLabel}>Göz Adedi *</Text>
+                <TextInput
+                  style={styles.tahminInput}
+                  value={tahminGozAdedi}
+                  onChangeText={setTahminGozAdedi}
+                  placeholder="Örn: 4"
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <TouchableOpacity
+                style={styles.tahminButton}
+                onPress={handleAITahmin}
+                disabled={receteLoading}
+              >
+                <Text style={styles.tahminButtonText}>🎯 TAHMİN YAP</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* AI Tahmin Sonucu */}
+          {!receteLoading && recete && recete.kaynak === 'ai_tahmin' && recete.degerler && (
+            <View style={styles.receteCard}>
+              <Text style={styles.receteTitle}>🎯 TAHMİNİ DEĞERLER</Text>
+              <View style={styles.receteRow}>
+                <Text style={styles.receteLabel}>Enjeksiyon Sıcaklığı:</Text>
+                <Text style={styles.receteValue}>~{recete.degerler.enjeksiyon_sicakligi}°C</Text>
+              </View>
+              <View style={styles.receteRow}>
+                <Text style={styles.receteLabel}>Kalıp Sıcaklığı:</Text>
+                <Text style={styles.receteValue}>~{recete.degerler.kalip_sicakligi}°C</Text>
+              </View>
+              <View style={styles.receteRow}>
+                <Text style={styles.receteLabel}>Çevrim Süresi:</Text>
+                <Text style={styles.receteValue}>~{recete.degerler.cevrim_suresi} sn</Text>
+              </View>
+            </View>
+          )}
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Hedef Ürün Sayısı *</Text>
@@ -1593,6 +1797,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
+  productSearchInputWithButton: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    padding: 10,
+    fontSize: 14,
+    color: '#2c3e50',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRightWidth: 0,
+  },
+  sorgulaButton: {
+    backgroundColor: '#3498db',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sorgulaButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  listToggleButton: {
+    padding: 8,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  listToggleText: {
+    color: '#7f8c8d',
+    fontSize: 13,
+  },
   productSearchIcon: {
     position: 'absolute',
     right: 20,
@@ -1737,6 +1979,118 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2c3e50',
     fontWeight: '500',
+  },
+  // Reçete stilleri
+  receteCard: {
+    backgroundColor: '#e8f5e9',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#27ae60',
+  },
+  receteTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#27ae60',
+    marginBottom: 12,
+  },
+  receteRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#c8e6c9',
+  },
+  receteLabel: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  receteValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#27ae60',
+  },
+  receteLoadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+  },
+  // Tahmin formu stilleri
+  tahminCard: {
+    backgroundColor: '#fff3e0',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f39c12',
+  },
+  tahminTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#e67e22',
+    marginBottom: 4,
+  },
+  tahminSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 15,
+  },
+  tahminInputContainer: {
+    marginBottom: 12,
+  },
+  tahminLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 6,
+  },
+  tahminInput: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
+  },
+  malzemeScroll: {
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  malzemeChip: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  malzemeChipSelected: {
+    backgroundColor: '#3498db',
+    borderColor: '#3498db',
+  },
+  malzemeChipText: {
+    fontSize: 13,
+    color: '#2c3e50',
+  },
+  malzemeChipTextSelected: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  tahminButton: {
+    backgroundColor: '#f39c12',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  tahminButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

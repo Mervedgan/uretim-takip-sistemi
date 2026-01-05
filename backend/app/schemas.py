@@ -74,6 +74,25 @@ class ProductUpdate(BaseModel):
     part_weight_g: Optional[int] = Field(None, ge=0)
     hourly_production: Optional[int] = Field(None, ge=0)
 
+
+class ProductUpsert(BaseModel):
+    """Ürün ekleme veya güncelleme (varsa güncelle, yoksa ekle)"""
+    name: str = Field(..., min_length=1, max_length=200, description="Ürün adı (anahtar alan)")
+    code: Optional[str] = Field(None, max_length=50, description="Ürün kodu (opsiyonel, yoksa otomatik oluşturulur)")
+    description: Optional[str] = Field(None, max_length=500, description="Ürün açıklaması")
+    
+    # Üretim parametreleri (AI eğitimi için önemli)
+    cavity_count: Optional[int] = Field(None, ge=1, description="Göz Adedi")
+    cycle_time_sec: Optional[int] = Field(None, ge=1, description="Çevrim Süresi (sn)")
+    injection_temp_c: Optional[int] = Field(None, ge=0, description="Enj. Sıcaklığı (°C)")
+    mold_temp_c: Optional[int] = Field(None, ge=0, description="Kalıp Sıcaklığı (°C)")
+    material: Optional[str] = Field(None, max_length=100, description="Malzeme")
+    part_weight_g: Optional[int] = Field(None, ge=0, description="Parça Ağırlığı (g)")
+    hourly_production: Optional[int] = Field(None, ge=0, description="Saatlik Üretim (adet)")
+    
+    # AI eğitim kontrolü
+    auto_train: Optional[bool] = Field(False, description="True ise güncelleme sonrası AI modeli otomatik eğitilir")
+
 class ProductResponse(BaseModel):
     id: int
     code: str

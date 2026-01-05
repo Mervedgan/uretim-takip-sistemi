@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.db import engine, Base
-from app.routers import stages, auth, work_orders, metrics, issues, machines, products, molds
+from app.routers import stages, auth, work_orders, metrics, issues, machines, products, molds, ai
 from app.config import CORS_ORIGINS
 from app.logging_config import logger
 
@@ -111,9 +111,10 @@ def custom_openapi():
         "description": "Login'den aldığınız access_token değerini buraya yapıştırın (Bearer ön eki olmadan)"
     }
     
-    # Tüm endpoint'lere BearerAuth uygula (login ve register hariç)
+    # Tüm endpoint'lere BearerAuth uygula (login, register ve AI endpointleri hariç)
+    public_paths = ["/auth/login", "/auth/register", "/", "/api/urunler", "/api/recete", "/api/ai/train", "/api/ai/status"]
     for path, methods in openapi_schema.get("paths", {}).items():
-        if path not in ["/auth/login", "/auth/register", "/"]:
+        if path not in public_paths and not path.startswith("/api/ai/"):
             for method in methods.values():
                 if isinstance(method, dict) and "security" not in method:
                     method["security"] = [{"BearerAuth": []}]
@@ -148,6 +149,7 @@ app.include_router(issues.router)
 app.include_router(machines.router)
 app.include_router(products.router)
 app.include_router(molds.router)
+app.include_router(ai.router)  # AI Üretim Tahmini
 
 
 
