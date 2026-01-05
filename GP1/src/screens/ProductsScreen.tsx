@@ -44,11 +44,14 @@ interface WorkOrder {
   id: number;
   product_code: string;
   produced_qty: number;
+  qty: number;  // Hedef üretim miktarı
+  machine_id?: number | null;  // Operatör tarafından başlatıldıysa dolu
 }
 
 interface ProductWithDetails extends Product {
   mold?: Mold;
   producedQty: number;
+  isActive: boolean;  // Aktif üretimde mi?
 }
 
 const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
@@ -84,10 +87,17 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
         const productWorkOrders = allWorkOrders.filter(wo => wo.product_code === product.code);
         const totalProducedQty = productWorkOrders.reduce((sum, wo) => sum + (wo.produced_qty || 0), 0);
         
+        // Aktif üretimde mi? (Operatör tarafından başlatılmış VE tamamlanmamış work order var mı?)
+        // machine_id varsa operatör tarafından başlatılmış demektir
+        const hasActiveWorkOrder = productWorkOrders.some(wo => 
+          wo.machine_id && (wo.produced_qty || 0) < (wo.qty || 0)
+        );
+        
         return {
           ...product,
           mold: mold,
           producedQty: totalProducedQty,
+          isActive: hasActiveWorkOrder,
         };
       });
       
@@ -203,7 +213,8 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
             const moldTemp = product.mold_temp_c || 0;
             const material = product.material || '-';
             const partWeight = product.part_weight_g || 0;
-            const moldName = mold?.name || '-';
+            // Kalıp adı: önce mold.name, yoksa mold.code, yoksa product.code kullan
+            const moldName = mold?.name || mold?.code || product.code || '-';
             const isExpanded = expandedProducts.has(product.id);
             
             return (
@@ -223,16 +234,14 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
                 {/* Detaylar - Sadece açıkken göster */}
                 {isExpanded && (
                   <View style={styles.productDetails}>
-                    {/* Header */}
-                    <View style={styles.detailHeader}>
-                      <View>
-                        <Text style={styles.productCode}>{product.code}</Text>
-                        <Text style={styles.moldCode}>{moldName}</Text>
+                    {/* Header - Sadece aktif üretimde ise badge göster */}
+                    {product.isActive && (
+                      <View style={styles.detailHeader}>
+                        <View style={styles.statusBadge}>
+                          <Text style={styles.statusText}>Aktif</Text>
+                        </View>
                       </View>
-                      <View style={styles.statusBadge}>
-                        <Text style={styles.statusText}>Aktif</Text>
-                      </View>
-                    </View>
+                    )}
                     
                     {/* Metrikler - 4 ayrı kutucuk */}
                     <View style={styles.metricsRow}>
@@ -363,21 +372,9 @@ const styles = StyleSheet.create({
   },
   detailHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'flex-start',
     marginBottom: 15,
-  },
-  productCode: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#7f8c8d',
-    marginBottom: 4,
-    letterSpacing: 0.5,
-  },
-  moldCode: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
   },
   statusBadge: {
     backgroundColor: '#27ae60',

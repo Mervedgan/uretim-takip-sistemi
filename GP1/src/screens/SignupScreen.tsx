@@ -311,7 +311,6 @@ const SignupScreen: React.FC<SignupScreenProps> = ({ onBack }) => {
               pressed && styles.signupButtonPressed
             ]}
             onPress={() => {
-              Alert.alert('Test', 'Buton tıklandı!');
               console.log('=== KAYIT OL BUTONUNA BASILDI ===');
               if (!isLoading) {
                 handleSignup();

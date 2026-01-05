@@ -120,11 +120,15 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
   const [tahminAgirlik, setTahminAgirlik] = useState('');
   const [tahminGozAdedi, setTahminGozAdedi] = useState('');
 
-  // Load products and machines when new production tab is active
+  // Load products on mount (needed for both dashboard and new production)
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  // Load machines when new production tab is active
   useEffect(() => {
     if (activeTab === 'new') {
-      loadProducts();
-      loadMachines(); // Makineleri de yükle
+      loadMachines();
     }
   }, [activeTab]);
 
@@ -398,7 +402,7 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       setProcessingStageId(stageId);
       console.log('Starting stage:', stageId);
       await stagesAPI.startStage(stageId);
-      Alert.alert('Başarılı', 'Aşama başlatıldı!');
+      // Başarı mesajı kaldırıldı - kullanıcı deneyimi için
       if (selectedWorkOrder) {
         await loadWorkOrderStages(selectedWorkOrder);
       }
@@ -424,7 +428,7 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       setProcessingStageId(stageId);
       console.log('Completing stage:', stageId);
       await stagesAPI.doneStage(stageId);
-      Alert.alert('Başarılı', 'Aşama tamamlandı!');
+      // Başarı mesajı kaldırıldı - kullanıcı deneyimi için
       if (selectedWorkOrder) {
         await loadWorkOrderStages(selectedWorkOrder);
       }
@@ -591,35 +595,26 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
       setHourlyProduction('');
       setCavityCount('');
 
-      const successMessage = stageStarted 
-        ? `Üretim başlatıldı!\nWork Order ID: ${result.work_order_id}\nDashboard'daki "Aktif Üretimler" bölümünden takip edebilirsiniz.`
-        : `İş emri oluşturuldu!\nWork Order ID: ${result.work_order_id}\nNot: Aşama başlatılamadı, lütfen Dashboard'dan manuel olarak başlatın.`;
+      // Başarı mesajı kaldırıldı - kullanıcı deneyimi için
+      // Veritabanı güncellemesinin tamamlanması için bekleme
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
-      Alert.alert(
-        'Başarılı', 
-        successMessage,
-        [{ text: 'Tamam', onPress: async () => {
-          // Veritabanı güncellemesinin tamamlanması için bekleme
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Ana Dashboard'ı yenile (eğer callback varsa)
-          if (onProductionStarted) {
-            onProductionStarted();
-          }
-          
-          // OperatorScreen'in kendi dashboard'ına geç ve yenile
-          setActiveTab('dashboard');
-          await loadDashboardData();
-          
-          // Ek refresh'ler (stage'lerin güncellenmesi için)
-          setTimeout(() => {
-            loadDashboardData();
-          }, 1500);
-          setTimeout(() => {
-            loadDashboardData();
-          }, 3000);
-        }}]
-      );
+      // Ana Dashboard'ı yenile (eğer callback varsa)
+      if (onProductionStarted) {
+        onProductionStarted();
+      }
+      
+      // OperatorScreen'in kendi dashboard'ına geç ve yenile
+      setActiveTab('dashboard');
+      await loadDashboardData();
+      
+      // Ek refresh'ler (stage'lerin güncellenmesi için)
+      setTimeout(() => {
+        loadDashboardData();
+      }, 1500);
+      setTimeout(() => {
+        loadDashboardData();
+      }, 3000);
     } catch (error: any) {
       console.error('Error creating work order:', error);
       Alert.alert(
@@ -798,7 +793,9 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                         <Text style={styles.workOrderTitle}>İş Emri #{wo.id}</Text>
                         <Text style={styles.workOrderCode}>{wo.product_code}</Text>
                       </View>
-                      <Text style={styles.workOrderDetail}>Lot: {wo.lot_no}</Text>
+                      <Text style={styles.workOrderDetail}>
+                        Ürün: {products.find((p: any) => p.code === wo.product_code)?.name || wo.product_code}
+                      </Text>
                       <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
                       <Text style={styles.workOrderDetail}>
                         Başlangıç: {formatDate(wo.planned_start)}
@@ -1044,6 +1041,8 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                       setProductId(foundProduct.id);
                       await loadMoldsForProduct(foundProduct.id);
                       await loadRecete(foundProduct.name);
+                      // Seçilen ürün adını input'a yaz
+                      setProductSearchQuery(foundProduct.name);
                       setShowProductsList(false);
                     } else {
                       // Listede yok - API'den reçete sorgula
@@ -1102,8 +1101,8 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                           await loadMoldsForProduct(product.id);
                           // Reçete bilgilerini yükle
                           await loadRecete(product.name);
-                          // Arama sorgusunu temizle ve listeyi kapat
-                          setProductSearchQuery('');
+                          // Seçilen ürün adını input'a yaz ve listeyi kapat
+                          setProductSearchQuery(product.name);
                           setShowProductsList(false);
                         }}
                       >

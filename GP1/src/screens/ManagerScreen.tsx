@@ -15,7 +15,7 @@ import {
   TextInput,
 } from 'react-native';
 import { User, ProductionRecord, Machine, ProductionAnalysis, OperatorPerformance, MachinePerformance, DailyProduction } from '../types';
-import { workOrdersAPI, machinesAPI, issuesAPI, authAPI } from '../utils/api';
+import { workOrdersAPI, machinesAPI, issuesAPI, authAPI, productsAPI } from '../utils/api';
 
 interface ManagerScreenProps {
   user: User;
@@ -91,6 +91,24 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
   const scrollPositionRef = useRef<number>(0);
   const userSectionYRef = useRef<number>(0); // Bölümün Y pozisyonu
   const savedScrollYRef = useRef<number>(0); // Kaydedilen scroll pozisyonu
+  
+  // Products state (ürün adı göstermek için)
+  const [products, setProducts] = useState<any[]>([]);
+
+  // Load products on mount
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const loadProducts = async () => {
+    try {
+      const productsResponse = await productsAPI.getProducts();
+      const allProducts = Array.isArray(productsResponse) ? productsResponse : [];
+      setProducts(allProducts);
+    } catch (error: any) {
+      console.error('Error loading products:', error);
+    }
+  };
 
   // Backend'den veri yükle
   const loadBackendData = async () => {
@@ -184,12 +202,15 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
         const machineIndex = wo.id % (allMachines.length || 1);
         const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
 
+        // Ürün adını bul
+        const productForWO = products.find((p: any) => p.code === wo.product_code);
+
         return {
           id: `WO-${wo.id}`,
           machineId: machine.id.toString(),
           operatorId: wo.created_by?.toString() || 'unknown',
           operatorName: wo.created_by_username || 'Bilinmeyen',
-          productName: wo.product_code || wo.lot_no,
+          productName: productForWO?.name || wo.product_code || wo.lot_no,
           startTime: new Date(startTime),
           partCount: producedCount,
           targetCount: wo.qty,
@@ -250,12 +271,15 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
         const machineIndex = wo.id % (allMachines.length || 1);
         const machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
 
+        // Ürün adını bul
+        const productForWO2 = products.find((p: any) => p.code === wo.product_code);
+
         return {
           id: `WO-${wo.id}`,
           machineId: machine.id.toString(),
           operatorId: wo.created_by?.toString() || 'unknown',
           operatorName: wo.created_by_username || 'Bilinmeyen',
-          productName: wo.product_code || wo.lot_no,
+          productName: productForWO2?.name || wo.product_code || wo.lot_no,
           startTime: new Date(startTime),
           endTime: endTime,
           partCount: producedCount,
@@ -814,7 +838,7 @@ const ManagerScreen: React.FC<ManagerScreenProps> = ({ user, onBack }) => {
                         İş Emri #{workOrder.id} - {stage.stage_name}
                       </Text>
                       <Text style={styles.activeStageProduct}>
-                        Ürün: {workOrder.product_code} | Lot: {workOrder.lot_no}
+                        Ürün: {products.find((p: any) => p.code === workOrder.product_code)?.name || workOrder.product_code}
                       </Text>
                     </View>
                     <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>

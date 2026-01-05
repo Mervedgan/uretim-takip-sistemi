@@ -16,7 +16,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { User } from '../types';
-import { workOrdersAPI, stagesAPI, machinesAPI, issuesAPI } from '../utils/api';
+import { workOrdersAPI, stagesAPI, machinesAPI, issuesAPI, productsAPI } from '../utils/api';
 
 interface PlannerScreenProps {
   user: User;
@@ -94,7 +94,27 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [workOrderSearchQuery, setWorkOrderSearchQuery] = useState<string>(''); // İş emri arama sorgusu
   const [showWorkOrderStages, setShowWorkOrderStages] = useState<boolean>(true); // Varsayılan açık
   const [stageSearchQuery, setStageSearchQuery] = useState<string>(''); // Arama sorgusu
-  const [showMachines, setShowMachines] = useState<boolean>(false);
+  // showMachines state kaldırıldı - makineler bölümü ana ekranda
+  
+  // Products state (ürün adı göstermek için)
+  const [products, setProducts] = useState<any[]>([]);
+  const [productSearchQuery, setProductSearchQuery] = useState<string>('');
+  const [showProductsList, setShowProductsList] = useState<boolean>(false);
+
+  // Load products on mount
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const loadProducts = async () => {
+    try {
+      const productsResponse = await productsAPI.getProducts();
+      const allProducts = Array.isArray(productsResponse) ? productsResponse : [];
+      setProducts(allProducts);
+    } catch (error: any) {
+      console.error('Error loading products:', error);
+    }
+  };
 
   // Load dashboard data
   useEffect(() => {
@@ -256,11 +276,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       return;
     }
 
-    if (!lotNo.trim()) {
-      Alert.alert('Hata', 'Lütfen lot numarası girin!');
-      return;
-    }
-
     if (!qty.trim() || isNaN(parseInt(qty)) || parseInt(qty) <= 0) {
       Alert.alert('Hata', 'Lütfen geçerli bir miktar girin!');
       return;
@@ -303,9 +318,13 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         return;
       }
 
+      // Otomatik LOT numarası oluştur
+      const now = new Date();
+      const autoLotNo = `LOT-${now.toISOString().slice(0,10)}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+
       const workOrderData = {
         product_code: productCode.trim(),
-        lot_no: lotNo.trim(),
+        lot_no: autoLotNo,
         qty: parseInt(qty),
         planned_start: startDate.toISOString(),
         planned_end: endDate.toISOString(),
@@ -322,6 +341,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         [{ text: 'Tamam', onPress: () => {
           // Formu temizle
           setProductCode('');
+          setProductSearchQuery('');
           setLotNo('');
           setQty('');
           setPlannedStart('');
@@ -539,8 +559,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                           <Text style={styles.statusText}>Aktif</Text>
                         </View>
                       </View>
-                      <Text style={styles.workOrderDetail}>Ürün: {wo.product_code}</Text>
-                      <Text style={styles.workOrderDetail}>Lot: {wo.lot_no}</Text>
+                      <Text style={styles.workOrderDetail}>Ürün: {products.find((p: any) => p.code === wo.product_code)?.name || wo.product_code}</Text>
                       <Text style={styles.workOrderDetail}>Miktar: {wo.qty}</Text>
                       <Text style={styles.workOrderDetail}>
                         Başlangıç: {formatDate(wo.planned_start)}
@@ -649,49 +668,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           </View>
         )}
 
-        {/* Makineler */}
-        <View style={styles.dashboardCard}>
-          <TouchableOpacity 
-            style={styles.sectionHeader}
-            onPress={() => setShowMachines(!showMachines)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.cardTitle}>🏭 Makineler</Text>
-            <Text style={styles.expandIcon}>
-              {showMachines ? '▼' : '▶'}
-            </Text>
-          </TouchableOpacity>
-          
-          {showMachines && (
-            <>
-              {loading && !machines.length ? (
-            <ActivityIndicator size="small" color="#9b59b6" style={{ marginVertical: 20 }} />
-          ) : machines.length === 0 ? (
-            <Text style={styles.emptyText}>Makine bulunmuyor</Text>
-          ) : (
-            machines.map((machine) => (
-              <View key={machine.id} style={styles.machineItem}>
-                <View style={styles.machineHeader}>
-                  <Text style={styles.machineName}>{machine.name}</Text>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      { backgroundColor: getStatusColor(machine.status) }
-                    ]}
-                  >
-                    <Text style={styles.statusText}>{machine.status}</Text>
-                  </View>
-                </View>
-                <Text style={styles.machineDetail}>Tip: {machine.machine_type}</Text>
-                {machine.location && (
-                  <Text style={styles.machineDetail}>Konum: {machine.location}</Text>
-                )}
-              </View>
-            ))
-              )}
-            </>
-          )}
-        </View>
       </ScrollView>
     );
   };
@@ -707,24 +683,73 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Yeni İş Emri Oluştur</Text>
 
+          {/* Ürün Ara / Seç */}
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Ürün Kodu *</Text>
-            <TextInput
-              style={styles.input}
-              value={productCode}
-              onChangeText={setProductCode}
-              placeholder="Örn: PROD-001"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Lot Numarası *</Text>
-            <TextInput
-              style={styles.input}
-              value={lotNo}
-              onChangeText={setLotNo}
-              placeholder="Örn: LOT-2024-001"
-            />
+            <Text style={styles.label}>Ürün Ara / Seç *</Text>
+            <View style={styles.productsListContainer}>
+              {/* Arama Çubuğu ve Dropdown Toggle */}
+              <TouchableOpacity 
+                style={styles.productSearchRow}
+                onPress={() => setShowProductsList(!showProductsList)}
+                activeOpacity={0.9}
+              >
+                <TextInput
+                  style={styles.productSearchInputInRow}
+                  placeholder="Ürün adı veya kodu ile ara..."
+                  placeholderTextColor="#95a5a6"
+                  value={productSearchQuery}
+                  onChangeText={(text) => {
+                    setProductSearchQuery(text);
+                  }}
+                  onFocus={() => setShowProductsList(true)}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Text style={styles.dropdownArrow}>
+                  {showProductsList ? '▲' : '▼'}
+                </Text>
+              </TouchableOpacity>
+            
+              {showProductsList && (
+                <ScrollView style={styles.productsListScroll} nestedScrollEnabled={true}>
+                  {(() => {
+                    const filteredProducts = productSearchQuery.trim() === '' 
+                      ? products 
+                      : products.filter(product => 
+                          product.code.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                          product.name.toLowerCase().includes(productSearchQuery.toLowerCase())
+                        );
+                    
+                    if (filteredProducts.length === 0) {
+                      return (
+                        <Text style={styles.hintText}>
+                          {productSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Ürün bulunamadı.'}
+                        </Text>
+                      );
+                    }
+                    
+                    return filteredProducts.map((product) => (
+                      <TouchableOpacity
+                        key={product.id}
+                        style={styles.productItem}
+                        onPress={() => {
+                          setProductCode(product.code);
+                          setProductSearchQuery(product.name);
+                          setShowProductsList(false);
+                        }}
+                      >
+                        <Text style={styles.productItemText}>
+                          {product.code} - {product.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ));
+                  })()}
+                </ScrollView>
+              )}
+            </View>
+            <Text style={styles.hintText}>
+              Ürün adı veya kodu yazarak arayın veya listeden seçin.
+            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1203,6 +1228,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     borderWidth: 1,
     borderColor: '#ddd',
+    color: '#2c3e50',
+  },
+  // Ürün arama stilleri
+  productsListContainer: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  productSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    paddingRight: 12,
+  },
+  productSearchInputInRow: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  dropdownArrow: {
+    fontSize: 14,
+    color: '#7f8c8d',
+  },
+  productsListScroll: {
+    maxHeight: 200,
+    marginTop: 10,
+  },
+  productItem: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 6,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  productItemText: {
+    fontSize: 14,
     color: '#2c3e50',
   },
 });

@@ -779,7 +779,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
       await new Promise<void>(resolve => setTimeout(() => resolve(), 500));
       await loadBackendData();
       
-      Alert.alert('Başarılı', 'Makine çalışmaya devam ediyor.');
+      // Başarı mesajı kaldırıldı - kullanıcı deneyimi için
     } catch (error: any) {
       console.error('Error resuming production:', error);
       Alert.alert('Hata', error.message || 'Makine devam ettirilemedi. Lütfen tekrar deneyin.');
@@ -900,8 +900,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         await new Promise<void>(resolve => setTimeout(() => resolve(), 500));
         await loadBackendData();
         
-        Alert.alert('Başarılı', 'Sorun bildirildi. Makine durduruldu. Yönetici ve planlayıcı bilgilendirildi.');
-        
+        // Başarı mesajı kaldırıldı - kullanıcı deneyimi için
         setShowIssueModal(false);
         setIssueDescription('');
         setSelectedProductionId(null);
