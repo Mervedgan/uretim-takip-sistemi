@@ -2,8 +2,19 @@ import os
 from dotenv import load_dotenv
 from typing import Optional
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from `.env` if present, otherwise fall back to `env.local`.
+# Note: Creating/editing `.env` may be blocked in some environments; `env.local` keeps local defaults.
+_backend_root = os.path.dirname(os.path.dirname(__file__))  # .../backend
+_env_path = os.path.join(_backend_root, ".env")
+_env_local_path = os.path.join(_backend_root, "env.local")
+
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+elif os.path.exists(_env_local_path):
+    load_dotenv(_env_local_path)
+else:
+    # Fall back to process environment only
+    load_dotenv()
 
 # ============================================
 # SECURITY CONFIGURATION

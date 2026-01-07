@@ -95,6 +95,7 @@ export interface ProductionAnalysis {
   operatorPerformance: OperatorPerformance[];
   machinePerformance: MachinePerformance[];
   dailyProduction: DailyProduction[];
+  weeklyData?: DailyProduction[]; // Haftalık veriler (iş günleri)
 }
 
 // Operatör performansı

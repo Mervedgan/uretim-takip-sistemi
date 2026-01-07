@@ -6,8 +6,17 @@ import os
 import sys
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from `.env` if present, otherwise fall back to `env.local`.
+_backend_root = os.path.dirname(os.path.dirname(__file__))  # .../backend
+_env_path = os.path.join(_backend_root, ".env")
+_env_local_path = os.path.join(_backend_root, "env.local")
+
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+elif os.path.exists(_env_local_path):
+    load_dotenv(_env_local_path)
+else:
+    load_dotenv()
 
 # Add parent directory to path to import app
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))

@@ -896,90 +896,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
           </View>
         )}
 
-        {/* Makineler */}
-        <View style={styles.dashboardCard}>
-          <TouchableOpacity 
-            style={styles.sectionHeader}
-            onPress={() => setShowMachines(!showMachines)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.cardTitle}>🏭 Makineler</Text>
-            <Text style={styles.expandIcon}>
-              {showMachines ? '▼' : '▶'}
-            </Text>
-          </TouchableOpacity>
-          
-          {showMachines && (
-            <>
-              {loading && !machines.length ? (
-            <ActivityIndicator size="small" color="#3498db" style={{ marginVertical: 20 }} />
-          ) : machines.length === 0 ? (
-            <Text style={styles.emptyText}>Makine bulunmuyor</Text>
-          ) : (
-            machines.map((machine) => (
-              <TouchableOpacity
-                key={machine.id}
-                style={[
-                  styles.machineItem,
-                  selectedMachine === machine.id && styles.machineItemSelected
-                ]}
-                onPress={() => loadMachineReadings(machine.id)}
-              >
-                <View style={styles.machineHeader}>
-                  <Text style={styles.machineName}>{machine.name}</Text>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      { backgroundColor: getMachineStatusColor(machine.status) }
-                    ]}
-                  >
-                    <Text style={styles.statusText}>{getMachineStatusText(machine.status)}</Text>
-                  </View>
-                </View>
-                <Text style={styles.machineDetail}>Tip: {machine.machine_type}</Text>
-                {machine.location && (
-                  <Text style={styles.machineDetail}>Konum: {machine.location}</Text>
-                )}
-              </TouchableOpacity>
-            ))
-              )}
-            </>
-          )}
-        </View>
-
-        {/* Makine Okumaları */}
-        {selectedMachine && machineReadings.length > 0 && (
-          <View style={styles.dashboardCard}>
-            <TouchableOpacity 
-              style={styles.sectionHeader}
-              onPress={() => setShowMachineReadings(!showMachineReadings)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.cardTitle}>
-                📊 Makine Okumaları ({machines.find(m => m.id === selectedMachine)?.name || 'Makine'})
-              </Text>
-              <Text style={styles.expandIcon}>
-                {showMachineReadings ? '▼' : '▶'}
-              </Text>
-            </TouchableOpacity>
-            
-            {showMachineReadings && (
-              <>
-                {machineReadings.slice(0, 5).map((reading) => (
-              <View key={reading.id} style={styles.readingItem}>
-                <View style={styles.readingHeader}>
-                  <Text style={styles.readingType}>{reading.reading_type}</Text>
-                  <Text style={styles.readingValue}>{reading.value}</Text>
-                </View>
-                <Text style={styles.readingTime}>
-                  {formatDate(reading.timestamp)}
-                </Text>
-              </View>
-                ))}
-              </>
-            )}
-          </View>
-        )}
       </ScrollView>
     );
   };
@@ -1115,9 +1031,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                 </ScrollView>
               )}
             </View>
-            <Text style={styles.hintText}>
-              Ürün adı yazıp SORGULA butonuna basın. Kayıtlıysa bilgileri, değilse tahmin formu gösterilir.
-            </Text>
           </View>
 
           {/* Reçete Bilgileri - Ürün seçildiğinde göster */}
@@ -1241,9 +1154,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Hedef miktarı girin"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Üretilmesi planlanan toplam ürün sayısı
-            </Text>
           </View>
 
           {/* Mold Seçimi - Sadece ürün seçildiyse göster */}
@@ -1266,9 +1176,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              <Text style={styles.hintText}>
-                Bu ürün için kullanılacak kalıbı seçin (kalıp bilgileri otomatik doldurulacak)
-              </Text>
             </View>
           )}
 
@@ -1281,9 +1188,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Örn: 5.5 (1 ürün kaç saniyede üretiliyor)"
               keyboardType="decimal-pad"
             />
-            <Text style={styles.hintText}>
-              Bir ürünün üretilmesi için geçen süre (saniye cinsinden)
-            </Text>
           </View>
 
           {/* Mold Bilgileri - Her zaman görünür */}
@@ -1296,9 +1200,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Örn: 220"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Enjeksiyon sıcaklığı (santigrat derece)
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1310,9 +1211,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Örn: 60"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Kalıp sıcaklığı (santigrat derece)
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1323,9 +1221,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               onChangeText={setMaterial}
               placeholder="Örn: PP, ABS, PC..."
             />
-            <Text style={styles.hintText}>
-              Kullanılacak malzeme tipi
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1337,9 +1232,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Örn: 15"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Üretilecek parçanın ağırlığı (gram)
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1351,9 +1243,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Örn: 720"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Saatte üretilecek parça sayısı
-            </Text>
           </View>
 
           {/* Göz Adedi - Sadece mold seçildiyse göster (opsiyonel) */}
@@ -1367,9 +1256,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                 placeholder="Örn: 4"
                 keyboardType="numeric"
               />
-              <Text style={styles.hintText}>
-                Kalıptaki göz (cavity) sayısı
-              </Text>
             </View>
           )}
 
@@ -1402,9 +1288,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
                 Makine bulunamadı. Lütfen backend'den makine ekleyin.
               </Text>
             )}
-            <Text style={styles.hintText}>
-              Bu üretim için kullanılacak makineyi seçin
-            </Text>
           </View>
 
           <View style={styles.inputContainer}>
@@ -1416,9 +1299,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
               placeholder="Örn: 3 (Parça Basım, Montaj, Boyama)"
               keyboardType="numeric"
             />
-            <Text style={styles.hintText}>
-              Ürün birden fazla aşamada üretiliyorsa aşama sayısını girin
-            </Text>
           </View>
 
           {/* Aşama İsimleri */}
@@ -1447,14 +1327,6 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
             <Text style={styles.startButtonText}>ÜRETİMİ BAŞLAT</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Bilgi Kartı */}
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>ℹ️ Bilgi</Text>
-          <Text style={styles.infoText}>
-            • Üretim başlatıldıktan sonra Dashboard'daki "Aktif Üretimler" bölümünden takip edebilirsiniz.
-          </Text>
-        </View>
       </ScrollView>
     );
   };
@@ -1477,7 +1349,7 @@ const OperatorScreen: React.FC<OperatorScreenProps> = ({ user, onBack, onProduct
           onPress={() => setActiveTab('dashboard')}
         >
           <Text style={[styles.tabText, activeTab === 'dashboard' && styles.tabTextActive]}>
-            📊 Dashboard
+            📋 İş Emirleri
           </Text>
         </TouchableOpacity>
         <TouchableOpacity

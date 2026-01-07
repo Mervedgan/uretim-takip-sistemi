@@ -3,18 +3,18 @@
  * Production_db'deki kalıpları listeler
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   RefreshControl,
   ActivityIndicator,
   Alert,
   TextInput,
   Modal,
+  FlatList,
 } from 'react-native';
 import { User } from '../types';
 import { moldsAPI } from '../utils/api';
@@ -42,86 +42,67 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [moldCode, setMoldCode] = useState('');
-  const [productId, setProductId] = useState('');
   const [addingMold, setAddingMold] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [moldNameToDelete, setMoldNameToDelete] = useState('');
+  const [moldToDelete, setMoldToDelete] = useState<Mold | null>(null);
   const [deletingMold, setDeletingMold] = useState(false);
 
   // Sadece planner ve admin kalıp ekleyebilir
   const canAddMold = user.role === 'planner' || user.role === 'admin';
 
-  const loadMolds = async () => {
+  const loadMolds = useCallback(async () => {
     try {
       setLoading(true);
       const data = await moldsAPI.getMolds();
       setMolds(Array.isArray(data) ? data : []);
     } catch (error: any) {
-      console.error('Error loading molds:', error);
+      console.error('❌ Error loading molds:', error);
+      Alert.alert('Hata', 'Kalıplar yüklenirken bir hata oluştu.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadMolds();
-  }, []);
+  }, [loadMolds]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadMolds();
     setRefreshing(false);
-  };
+  }, [loadMolds]);
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    return date.toLocaleString('tr-TR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const handleAddMold = () => {
+  const handleAddMold = useCallback(() => {
     setMoldCode('');
-    setProductId('');
     setShowAddModal(true);
-  };
+  }, []);
 
-  const handleSaveMold = async () => {
-    if (!moldCode.trim()) {
+  const handleCloseAddModal = useCallback(() => {
+    setShowAddModal(false);
+    setMoldCode('');
+  }, []);
+
+  const handleSaveMold = useCallback(async () => {
+    const trimmedCode = moldCode.trim();
+    
+    if (!trimmedCode) {
       Alert.alert('Hata', 'Lütfen kalıp kodu girin!');
-      return;
-    }
-
-    if (!productId.trim()) {
-      Alert.alert('Hata', 'Lütfen ürün ID girin!');
-      return;
-    }
-
-    const parsedProductId = parseInt(productId, 10);
-    if (isNaN(parsedProductId) || parsedProductId <= 0) {
-      Alert.alert('Hata', 'Geçerli bir ürün ID girin!');
       return;
     }
 
     try {
       setAddingMold(true);
       await moldsAPI.createMold({
-        code: moldCode.trim(),
-        name: moldCode.trim(), // Kalıp kodu aynı zamanda isim olarak kullanılacak
-        product_id: parsedProductId,
+        code: trimmedCode,
+        name: trimmedCode,
+        product_id: null,
         status: 'active',
       });
       
       Alert.alert('Başarılı', 'Kalıp başarıyla eklendi!');
-      setShowAddModal(false);
-      setMoldCode('');
-      setProductId('');
-      await loadMolds(); // Listeyi yenile
+      handleCloseAddModal();
+      await loadMolds();
     } catch (error: any) {
       console.error('Error adding mold:', error);
       const errorMessage = error.response?.data?.detail || error.message || 'Kalıp eklenirken bir hata oluştu!';
@@ -129,141 +110,118 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
     } finally {
       setAddingMold(false);
     }
-  };
+  }, [moldCode, handleCloseAddModal, loadMolds]);
 
-  const handleDeleteMold = () => {
-    setMoldNameToDelete('');
+  const handleOpenDeleteModal = useCallback((mold: Mold) => {
+    setMoldToDelete(mold);
     setShowDeleteModal(true);
-  };
+  }, []);
 
-  const handleConfirmDelete = async () => {
-    if (!moldNameToDelete.trim()) {
-      Alert.alert('Hata', 'Lütfen kalıp adı girin!');
-      return;
+  const handleCloseDeleteModal = useCallback(() => {
+    setShowDeleteModal(false);
+    setMoldToDelete(null);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!moldToDelete) return;
+
+    try {
+      setDeletingMold(true);
+      await moldsAPI.deleteMold(moldToDelete.id);
+      Alert.alert('Başarılı', 'Kalıp başarıyla silindi!');
+      handleCloseDeleteModal();
+      await loadMolds();
+    } catch (error: any) {
+      console.error('Error deleting mold:', error);
+      Alert.alert('Hata', error.message || 'Kalıp silinirken bir hata oluştu!');
+    } finally {
+      setDeletingMold(false);
     }
+  }, [moldToDelete, handleCloseDeleteModal, loadMolds]);
 
-    // Kalıp adına göre kalıbı bul
-    const moldToDelete = molds.find(m => 
-      m.name.toLowerCase() === moldNameToDelete.trim().toLowerCase() ||
-      m.code.toLowerCase() === moldNameToDelete.trim().toLowerCase()
-    );
+  const renderMoldItem = useCallback(({ item: mold }: { item: Mold }) => (
+    <View style={styles.moldCard}>
+      <View style={styles.moldHeader}>
+        <Text style={styles.moldCode}>{mold.code}</Text>
+        <View style={styles.moldHeaderRight}>
+          {mold.product_id && (
+            <Text style={styles.moldProduct}>
+              Ürün ID: {mold.product_id}
+            </Text>
+          )}
+          {canAddMold && (
+            <TouchableOpacity
+              onPress={() => handleOpenDeleteModal(mold)}
+              style={styles.deleteIcon}
+              activeOpacity={0.6}
+            >
+              <Text style={styles.deleteIconText}>🗑️</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </View>
+  ), [canAddMold, handleOpenDeleteModal]);
 
-    if (!moldToDelete) {
-      Alert.alert('Hata', 'Bu isimde bir kalıp bulunamadı!');
-      return;
-    }
-
-    Alert.alert(
-      'Kalıp Sil',
-      `"${moldToDelete.code}" (${moldToDelete.name}) kalıbı silinecek. Emin misiniz?`,
-      [
-        {
-          text: 'İptal',
-          style: 'cancel',
-        },
-        {
-          text: 'Sil',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setDeletingMold(true);
-              await moldsAPI.deleteMold(moldToDelete.id);
-              Alert.alert('Başarılı', 'Kalıp başarıyla silindi!');
-              setShowDeleteModal(false);
-              setMoldNameToDelete('');
-              await loadMolds(); // Listeyi yenile
-            } catch (error: any) {
-              console.error('Error deleting mold:', error);
-              Alert.alert('Hata', error.message || 'Kalıp silinirken bir hata oluştu!');
-            } finally {
-              setDeletingMold(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
+  const keyExtractor = useCallback((item: Mold) => item.id.toString(), []);
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
+        <TouchableOpacity 
+          style={styles.backButton} 
+          onPress={onBack}
+          activeOpacity={0.7}
+        >
           <Text style={styles.backButtonText}>← Geri</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>KALIPLAR</Text>
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        <View style={styles.userInfo}>
-          <View style={styles.titleRow}>
-            <Text style={styles.welcomeText}>Kalıp Listesi</Text>
-            {canAddMold && (
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity
-                  style={styles.addButton}
-                  onPress={handleAddMold}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.addButtonText}>+ Kalıp Ekle</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={handleDeleteMold}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.deleteButtonText}>🗑️ Kalıp Sil</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
+      <View style={styles.content}>
+        <View style={styles.titleRow}>
+          <Text style={styles.welcomeText}>Kalıp Listesi</Text>
+          {canAddMold && (
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={handleAddMold}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.addButtonText}>+ Kalıp Ekle</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {loading && molds.length === 0 ? (
-          <ActivityIndicator size="large" color="#3498db" style={{ marginVertical: 40 }} />
+          <ActivityIndicator size="large" color="#3498db" style={styles.loader} />
         ) : molds.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>Kalıp bulunmamaktadır.</Text>
           </View>
         ) : (
-          molds.map((mold) => (
-            <View key={mold.id} style={styles.moldCard}>
-              <View style={styles.moldHeader}>
-                <Text style={styles.moldCode}>{mold.code}</Text>
-                {mold.product_id && (
-                  <Text style={styles.moldProduct}>
-                    Ürün ID: {mold.product_id}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.moldFooter}>
-                <Text style={styles.moldDate}>
-                  Oluşturulma: {formatDate(mold.created_at)}
-                </Text>
-                {mold.updated_at && (
-                  <Text style={styles.moldDate}>
-                    Güncelleme: {formatDate(mold.updated_at)}
-                  </Text>
-                )}
-              </View>
-            </View>
-          ))
+          <FlatList
+            data={molds}
+            keyExtractor={keyExtractor}
+            renderItem={renderMoldItem}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            contentContainerStyle={styles.flatListContent}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            windowSize={10}
+          />
         )}
-      </ScrollView>
+      </View>
 
       {/* Kalıp Ekleme Modal */}
       <Modal
         visible={showAddModal}
         transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowAddModal(false)}
+        animationType="fade"
+        onRequestClose={handleCloseAddModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -277,27 +235,15 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
               value={moldCode}
               onChangeText={setMoldCode}
               autoCapitalize="characters"
-            />
-
-            <Text style={styles.modalLabel}>Ürün ID *</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Örn: 1"
-              placeholderTextColor="#95a5a6"
-              value={productId}
-              onChangeText={setProductId}
-              keyboardType="numeric"
+              editable={!addingMold}
             />
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => {
-                  setShowAddModal(false);
-                  setMoldCode('');
-                  setProductId('');
-                }}
+                onPress={handleCloseAddModal}
                 disabled={addingMold}
+                activeOpacity={0.7}
               >
                 <Text style={styles.modalButtonCancelText}>İptal</Text>
               </TouchableOpacity>
@@ -305,6 +251,7 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
                 style={[styles.modalButton, styles.modalButtonSave]}
                 onPress={handleSaveMold}
                 disabled={addingMold}
+                activeOpacity={0.7}
               >
                 {addingMold ? (
                   <ActivityIndicator size="small" color="white" />
@@ -321,31 +268,25 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
       <Modal
         visible={showDeleteModal}
         transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowDeleteModal(false)}
+        animationType="fade"
+        onRequestClose={handleCloseDeleteModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Kalıp Sil</Text>
             
-            <Text style={styles.modalLabel}>Kalıp Adı veya Kodu *</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Örn: KP-01"
-              placeholderTextColor="#95a5a6"
-              value={moldNameToDelete}
-              onChangeText={setMoldNameToDelete}
-              autoCapitalize="characters"
-            />
+            {moldToDelete && (
+              <Text style={styles.modalMessage}>
+                "{moldToDelete.code}" ({moldToDelete.name}) kalıbını silmek istediğinize emin misiniz?
+              </Text>
+            )}
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => {
-                  setShowDeleteModal(false);
-                  setMoldNameToDelete('');
-                }}
+                onPress={handleCloseDeleteModal}
                 disabled={deletingMold}
+                activeOpacity={0.7}
               >
                 <Text style={styles.modalButtonCancelText}>İptal</Text>
               </TouchableOpacity>
@@ -353,6 +294,7 @@ const MoldsScreen: React.FC<MoldsScreenProps> = ({ user, onBack }) => {
                 style={[styles.modalButton, styles.modalButtonDelete]}
                 onPress={handleConfirmDelete}
                 disabled={deletingMold}
+                activeOpacity={0.7}
               >
                 {deletingMold ? (
                   <ActivityIndicator size="small" color="white" />
@@ -401,49 +343,36 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
   },
-  userInfo: {
-    marginBottom: 20,
+  flatListContent: {
+    paddingBottom: 20,
+  },
+  loader: {
+    marginTop: 40,
   },
   titleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
+    marginBottom: 20,
   },
   welcomeText: {
     fontSize: 20,
     fontWeight: '600',
     color: '#2c3e50',
   },
-  buttonContainer: {
-    flexDirection: 'column',
-    gap: 8,
-  },
   addButton: {
     backgroundColor: '#3498db',
     paddingHorizontal: 15,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 8,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addButtonText: {
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
-  },
-  deleteButton: {
-    backgroundColor: '#e74c3c',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  deleteButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#7f8c8d',
   },
   moldCard: {
     backgroundColor: 'white',
@@ -460,28 +389,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
   },
   moldCode: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#3498db',
+    flex: 1,
+  },
+  moldHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   moldProduct: {
     fontSize: 14,
     color: '#3498db',
     fontWeight: '600',
+    marginRight: 10,
   },
-  moldFooter: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#ecf0f1',
+  deleteIcon: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#fee',
+    minWidth: 36,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  moldDate: {
-    fontSize: 12,
-    color: '#95a5a6',
-    marginTop: 4,
+  deleteIconText: {
+    fontSize: 18,
   },
   emptyCard: {
     backgroundColor: 'white',
@@ -511,6 +446,11 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '85%',
     maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   modalTitle: {
     fontSize: 20,
@@ -535,6 +475,13 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     backgroundColor: '#f8f9fa',
   },
+  modalMessage: {
+    fontSize: 14,
+    color: '#2c3e50',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -545,6 +492,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
   },
   modalButtonCancel: {
     backgroundColor: '#ecf0f1',
@@ -576,4 +525,3 @@ const styles = StyleSheet.create({
 });
 
 export default MoldsScreen;
-

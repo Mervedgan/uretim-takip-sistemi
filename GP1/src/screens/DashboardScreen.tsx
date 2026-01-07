@@ -26,6 +26,7 @@ interface DashboardScreenProps {
   onNavigateToRoleScreen: () => void;
   onNavigateToProducts?: () => void;
   onNavigateToMolds?: () => void;
+  onNavigateToProfile?: () => void;
   refreshTrigger?: number;
 }
 
@@ -108,6 +109,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateToRoleScreen,
   onNavigateToProducts,
   onNavigateToMolds,
+  onNavigateToProfile,
   refreshTrigger
 }) => {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -117,6 +119,10 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [selectedProductionId, setSelectedProductionId] = useState<string | null>(null);
   const [issueDescription, setIssueDescription] = useState('');
+  const [selectedStopReason, setSelectedStopReason] = useState<string | null>(null);
+  const [targetReachedNotified, setTargetReachedNotified] = useState<Set<string>>(new Set());
+  const [lastQualityCheckTime, setLastQualityCheckTime] = useState<Map<string, Date>>(new Map());
+  const [qualityCheckNotified, setQualityCheckNotified] = useState<Set<string>>(new Set());
   
   // Dashboard accordion states
   const [showActiveProductions, setShowActiveProductions] = useState<boolean>(true); // Varsayılan açık
@@ -232,8 +238,9 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         }
         
         const stages = stagesMap.get(wo.id) || [];
-        // En az bir stage in_progress, paused veya done ise aktif
-        return stages.some(s => s.status === 'in_progress' || s.status === 'paused' || s.status === 'done');
+        // Sadece in_progress veya paused stage'leri olan work order'ları göster (done'ları çıkar)
+        // Tamamlanmış üretimler aktif üretimlerde gösterilmemeli
+        return stages.some(s => s.status === 'in_progress' || s.status === 'paused');
       });
 
       // Benzersiz product'ları bul (product_code'a göre)
@@ -294,20 +301,24 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         // Production ID'yi bir kez hesapla (deterministik makine seçimi için kullanılacak)
         const productionId = mold ? `WO-${wo.id}-PRODUCT-${product.id}-MOLD-${mold.id}` : `WO-${wo.id}-PRODUCT-${product.id}`;
         
-        // Makine seçimi: Önce work order'dan machine_id'yi al, yoksa work order ID'sine göre seç
+        // Makine seçimi: Sadece work order'da machine_id varsa makineyi göster
+        // Varsayılan makine gösterilmemeli - sadece worker'ın başlattığı üretimlerde makine olmalı
         let machine;
         if (wo.machine_id && wo.machine_id > 0) {
           // Work order'da machine_id varsa onu kullan
           machine = allMachines.find(m => m.id === wo.machine_id);
-          if (!machine && allMachines.length > 0) {
-            // Makine bulunamazsa ilk makineyi kullan
-            machine = allMachines[0];
+          // Makine bulunamazsa null bırak (varsayılan makine gösterme)
+          if (!machine) {
+            machine = null;
           }
         } else {
-          // Eski yöntem: Work order ID'sine göre deterministik seçim (geriye dönük uyumluluk için)
-          // Work order ID'sini kullan (her work order farklı makine alır)
-          const machineIndex = (wo.id - 1) % (allMachines.length || 1);
-          machine = allMachines[machineIndex] || (allMachines.length > 0 ? allMachines[0] : { id: 1, name: 'Makine 1' });
+          // machine_id yoksa makine gösterme (zaten filtreleme yapıldı ama ekstra güvenlik)
+          machine = null;
+        }
+        
+        // Makine yoksa bu production'ı atla (sadece worker'ın başlattığı üretimler gösterilmeli)
+        if (!machine) {
+          continue;
         }
 
         // Mevcut production'ı bul (eğer varsa) - ref'ten al (güncel değer)
@@ -584,6 +595,54 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
     let backendDataCounter = 0; // Backend data çağrısı için sayaç
     
     const updateProductions = () => {
+      // Sadece worker için bildirimler
+      if (user.role === 'worker') {
+        activeProductionsRef.current.forEach((production) => {
+          const now = new Date();
+          
+          // Hedef ürün sayısına ulaşma kontrolü
+          if (production.status === 'active' && production.targetCount) {
+            const currentCount = calculatePartCount(production);
+            if (currentCount >= production.targetCount && !targetReachedNotified.has(production.id)) {
+              // Bildirim gönder
+              Alert.alert(
+                'Üretim Tamamlandı',
+                `Makine ${production.machineId} için hedef ürün sayısına ulaşıldı.\nHedef: ${production.targetCount} adet\nÜretilen: ${currentCount} adet\n\nLütfen makineyi durdurun ve uygulamada "Durdur" butonuna basın.`,
+                [{ text: 'Tamam' }]
+              );
+              // Bildirim gönderildi olarak işaretle
+              setTargetReachedNotified(prev => new Set(prev).add(production.id));
+            }
+          }
+          
+          // 30 dakikalık hatalı ürün kontrol bildirimi
+          if (production.status === 'active') {
+            const lastCheck = lastQualityCheckTime.get(production.id);
+            const notificationKey = `${production.id}-${Math.floor(now.getTime() / (30 * 60 * 1000))}`;
+            
+            if (lastCheck) {
+              const timeDiff = (now.getTime() - lastCheck.getTime()) / 1000 / 60; // dakika
+              
+              if (timeDiff >= 30 && !qualityCheckNotified.has(notificationKey)) {
+                Alert.alert(
+                  'Kalite Kontrolü Gerekli',
+                  `Makine ${production.machineId} için hatalı ürün kontrolü yapmanız gerekiyor.\n\nLütfen makineyi kontrol edin ve sonucu kaydedin.`,
+                  [{ text: 'Tamam' }]
+                );
+                setQualityCheckNotified(prev => new Set(prev).add(notificationKey));
+              }
+            } else {
+              // İlk kez kontrol zamanı ayarla
+              setLastQualityCheckTime(prev => {
+                const newMap = new Map(prev);
+                newMap.set(production.id, now);
+                return newMap;
+              });
+            }
+          }
+        });
+      }
+
       // Her 5 saniyede bir (5 çağrıda bir) backend'den veri çek
       backendDataCounter++;
       if (backendDataCounter >= 5) {
@@ -643,9 +702,10 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
     };
 
     updateProductions();
-    const interval = setInterval(updateProductions, 1000);
+    // Veri çekme sıklığını azalt - her 5 saniyede bir güncelle (veri çakışmasını önlemek için)
+    const interval = setInterval(updateProductions, 5000);
     return () => clearInterval(interval);
-  }, []); // activeProductions dependency olarak eklenmemeli (sonsuz loop olur)
+  }, [targetReachedNotified]); // targetReachedNotified dependency olarak ekle
 
   const getRoleDisplayName = (role: string) => {
     switch (role) {
@@ -721,6 +781,8 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const handleStopProduction = (productionId: string) => {
     setSelectedProductionId(productionId);
+    setSelectedStopReason(null);
+    setIssueDescription('');
     setShowIssueModal(true);
   };
 
@@ -786,9 +848,9 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
     }
   };
 
-  const handleSubmitIssue = async () => {
-    if (!issueDescription.trim()) {
-      Alert.alert('Hata', 'Lütfen sorun açıklaması girin!');
+  const handleSubmitStopReason = async () => {
+    if (!selectedStopReason) {
+      Alert.alert('Hata', 'Lütfen durdurma sebebini seçin!');
       return;
     }
 
@@ -836,64 +898,117 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
           throw new Error('Durdurulacak stage bulunamadı');
         }
 
-        // Eğer stage zaten paused değilse, issue gönder ve pause et
-        if (targetStage.status !== 'paused') {
-          // Backend'e issue gönder
-          await stagesAPI.issueStage(targetStage.id, {
-            type: 'machine_breakdown', // Varsayılan tip
-            description: issueDescription.trim(),
-          });
-
-          // Stage'i pause et (backend'de durdur)
-          await stagesAPI.pauseStage(targetStage.id);
-        } else {
-          // Stage zaten paused ise, sadece issue gönder (yeni issue ekle)
-          await stagesAPI.issueStage(targetStage.id, {
-            type: 'machine_breakdown', // Varsayılan tip
-            description: issueDescription.trim(),
-          });
-        }
-
-        const pausedAt = new Date();
+        const now = new Date();
         
         // Durdurulduğunda o anki partCount'u hesapla ve kaydet
-        let pausedPartCount: number;
+        let finalPartCount: number;
         if (production.cycleTime && production.cycleTime > 0) {
           // Durdurulma zamanına kadar geçen süre
-          const elapsedSeconds = (pausedAt.getTime() - production.startTime.getTime()) / 1000;
-          pausedPartCount = Math.floor(elapsedSeconds / production.cycleTime);
+          const elapsedSeconds = (now.getTime() - production.startTime.getTime()) / 1000;
+          finalPartCount = Math.floor(elapsedSeconds / production.cycleTime);
+          // Hedef sayı varsa ve hedef sayıya ulaşıldıysa, hedef sayıyı kullan
+          if (production.targetCount && finalPartCount >= production.targetCount) {
+            finalPartCount = production.targetCount;
+          }
         } else {
           // Cycle time yoksa mevcut değeri kullan
-          pausedPartCount = production.partCount;
+          finalPartCount = production.partCount;
         }
 
-        // Local store'u güncelle (eğer kullanılıyorsa)
-        const productionInStore = productionStore.getAll().find(p => p.id === selectedProductionId);
-        if (productionInStore) {
-          productionStore.update(selectedProductionId, {
-            status: 'paused',
-            issue: issueDescription.trim(),
-            pausedAt: pausedAt,
-            partCount: pausedPartCount,
-          });
-        }
-
-        // State'i hemen güncelle (UI'ın hızlı tepki vermesi için)
-        const updatedProductions = activeProductions.map(p => 
-          p.id === selectedProductionId 
-            ? {
-                ...p,
-                status: 'paused' as const,
-                issue: issueDescription.trim(),
-                pausedAt: pausedAt,
-                partCount: pausedPartCount,
+        // Seçilen sebebe göre işlem yap
+        if (selectedStopReason === 'production_completed') {
+          // Üretim Tamamlandı - Stage'i done yap
+          if (targetStage.status !== 'done') {
+            await stagesAPI.doneStage(targetStage.id);
+          }
+          
+          // Production'ı completed olarak işaretle ve aktif üretimlerden çıkar
+          const updatedProductions = activeProductions
+            .filter(p => p.id !== selectedProductionId)
+            .map(p => {
+              if (p.id === selectedProductionId) {
+                return {
+                  ...p,
+                  status: 'completed' as const,
+                  partCount: finalPartCount,
+                  endTime: now,
+                };
               }
-            : p
-        );
-        
-        setActiveProductions(updatedProductions);
-        // Ref'i de hemen güncelle
-        activeProductionsRef.current = updatedProductions;
+              return p;
+            });
+          
+          setActiveProductions(updatedProductions);
+          activeProductionsRef.current = updatedProductions;
+          
+          // Local store'dan da kaldır
+          const productionInStore = productionStore.getAll().find(p => p.id === selectedProductionId);
+          if (productionInStore) {
+            productionStore.remove(selectedProductionId);
+          }
+        } else {
+          // Diğer sebepler (Arıza, Hatalı Ürün, Diğer) - Pause yap ve issue kaydet
+          let issueText = '';
+          if (selectedStopReason === 'machine_breakdown') {
+            issueText = 'Arıza';
+          } else if (selectedStopReason === 'defective_product') {
+            issueText = 'Hatalı Ürün Tespit Edildi';
+          } else if (selectedStopReason === 'other') {
+            // Diğer seçeneği için açıklama zorunlu
+            if (!issueDescription.trim()) {
+              Alert.alert('Hata', 'Lütfen sorunu açıklayın!');
+              return;
+            }
+            issueText = issueDescription.trim();
+          } else {
+            issueText = issueDescription.trim() || selectedStopReason;
+          }
+
+          // Eğer stage zaten paused değilse, issue gönder ve pause et
+          if (targetStage.status !== 'paused') {
+            // Backend'e issue gönder
+            await stagesAPI.issueStage(targetStage.id, {
+              type: selectedStopReason === 'machine_breakdown' ? 'machine_breakdown' : 'quality_issue',
+              description: issueText,
+            });
+
+            // Stage'i pause et (backend'de durdur)
+            await stagesAPI.pauseStage(targetStage.id);
+          } else {
+            // Stage zaten paused ise, sadece issue gönder (yeni issue ekle)
+            await stagesAPI.issueStage(targetStage.id, {
+              type: selectedStopReason === 'machine_breakdown' ? 'machine_breakdown' : 'quality_issue',
+              description: issueText,
+            });
+          }
+
+          // Local store'u güncelle (eğer kullanılıyorsa)
+          const productionInStore = productionStore.getAll().find(p => p.id === selectedProductionId);
+          if (productionInStore) {
+            productionStore.update(selectedProductionId, {
+              status: 'paused',
+              issue: issueText,
+              pausedAt: now,
+              partCount: finalPartCount,
+            });
+          }
+
+          // State'i hemen güncelle (UI'ın hızlı tepki vermesi için)
+          const updatedProductions = activeProductions.map(p => 
+            p.id === selectedProductionId 
+              ? {
+                  ...p,
+                  status: 'paused' as const,
+                  issue: issueText,
+                  pausedAt: now,
+                  partCount: finalPartCount,
+                }
+              : p
+          );
+          
+          setActiveProductions(updatedProductions);
+          // Ref'i de hemen güncelle
+          activeProductionsRef.current = updatedProductions;
+        }
 
         // Backend verilerini yeniden yükle (backend'in güncellenmesi için bekle)
         // Kısa bir gecikme ekle (backend'in güncellenmesi için) ve await ile bekle
@@ -903,6 +1018,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         // Başarı mesajı kaldırıldı - kullanıcı deneyimi için
         setShowIssueModal(false);
         setIssueDescription('');
+        setSelectedStopReason(null);
         setSelectedProductionId(null);
       } catch (error: any) {
         console.error('Error reporting issue:', error);
@@ -913,9 +1029,23 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* Header - Tüm roller için profil bilgili */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>DASHBOARD</Text>
+        <TouchableOpacity 
+          style={styles.profileSection}
+          onPress={onNavigateToProfile}
+          activeOpacity={0.7}
+        >
+          <View style={styles.profileAvatar}>
+            <Text style={styles.profileAvatarText}>
+              {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+            </Text>
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{user.name}</Text>
+            <Text style={styles.profileRole}>{getRoleDisplayName(user.role)}</Text>
+          </View>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.logoutButton} onPress={onLogout}>
           <Text style={styles.logoutButtonText}>Çıkış</Text>
         </TouchableOpacity>
@@ -934,16 +1064,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
           />
         }
       >
-        {/* User Info */}
-        <View style={styles.userInfo}>
-          <Text style={styles.welcomeText}>
-            Hoş geldiniz, {user.name}
-          </Text>
-          <Text style={styles.roleText}>
-            {getRoleDisplayName(user.role)} {user.department ? `- ${user.department}` : ''}
-          </Text>
-        </View>
-
         {/* Özet Kartları */}
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
@@ -1046,9 +1166,6 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   </View>
                 </View>
                 
-                {/* Ürün Adı */}
-                <Text style={styles.machineProductName}>{productName}</Text>
-                
                 {/* Metrikler - 4 ayrı kutucuk */}
                 <View style={styles.machineMetricsRow}>
                   <View style={styles.metricBox}>
@@ -1082,6 +1199,40 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <Text style={styles.machineDetail}>{material}</Text>
                   <Text style={styles.machineDetail}>{partWeight}g</Text>
                 </View>
+
+                {/* Hatalı Ürün Kontrol Paneli - Sadece worker ve aktif üretimler için */}
+                {user.role === 'worker' && isRunning && (
+                  <View style={styles.qualityCheckPanel}>
+                    <Text style={styles.qualityCheckTitle}>🔍 Hatalı Ürün Kontrolü</Text>
+                    <Text style={styles.qualityCheckSubtitle}>
+                      Son kontrol: {lastQualityCheckTime.get(production.id) 
+                        ? new Date(lastQualityCheckTime.get(production.id)!).toLocaleString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : 'Henüz yapılmadı'}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.qualityCheckButton}
+                      onPress={() => {
+                        const now = new Date();
+                        setLastQualityCheckTime(prev => {
+                          const newMap = new Map(prev);
+                          newMap.set(production.id, now);
+                          return newMap;
+                        });
+                        // Bildirimi sıfırla
+                        setQualityCheckNotified(prev => {
+                          const newSet = new Set(prev);
+                          const keys = Array.from(newSet).filter(key => !key.startsWith(production.id));
+                          return new Set(keys);
+                        });
+                      }}
+                    >
+                      <Text style={styles.qualityCheckButtonText}>✓ Kontrol Yapıldı</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {/* Durdur/Devam Et Butonları - Sadece worker için */}
                 {user.role === 'worker' && (
@@ -1265,7 +1416,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Sorun Bildir Modal */}
+      {/* Sorun Bildirme Modal */}
       <Modal
         visible={showIssueModal}
         transparent={true}
@@ -1273,6 +1424,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
         onRequestClose={() => {
           setShowIssueModal(false);
           setIssueDescription('');
+          setSelectedStopReason(null);
           setSelectedProductionId(null);
         }}
       >
@@ -1280,18 +1432,84 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Sorun Bildir</Text>
             <Text style={styles.modalSubtitle}>
-              Makineyi neden durdurdunuz? Lütfen sorunu açıklayın.
+              Makineyi neden durdurdunuz? Lütfen sebebi seçin.
             </Text>
             
-            <TextInput
-              style={styles.issueInput}
-              placeholder="Örn: Makine arızası, hatalı ürün üretimi, kalite kontrolü..."
-              value={issueDescription}
-              onChangeText={setIssueDescription}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
+            {/* Durdurma Sebepleri */}
+            <View style={styles.stopReasonContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.stopReasonButton,
+                  selectedStopReason === 'machine_breakdown' && styles.stopReasonButtonSelected
+                ]}
+                onPress={() => setSelectedStopReason('machine_breakdown')}
+              >
+                <Text style={[
+                  styles.stopReasonText,
+                  selectedStopReason === 'machine_breakdown' && styles.stopReasonTextSelected
+                ]}>
+                  🔧 Arıza
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.stopReasonButton,
+                  selectedStopReason === 'production_completed' && styles.stopReasonButtonSelected
+                ]}
+                onPress={() => setSelectedStopReason('production_completed')}
+              >
+                <Text style={[
+                  styles.stopReasonText,
+                  selectedStopReason === 'production_completed' && styles.stopReasonTextSelected
+                ]}>
+                  ✅ Üretim Tamamlandı
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.stopReasonButton,
+                  selectedStopReason === 'defective_product' && styles.stopReasonButtonSelected
+                ]}
+                onPress={() => setSelectedStopReason('defective_product')}
+              >
+                <Text style={[
+                  styles.stopReasonText,
+                  selectedStopReason === 'defective_product' && styles.stopReasonTextSelected
+                ]}>
+                  ⚠️ Hatalı Ürün Tespit Edildi
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.stopReasonButton,
+                  selectedStopReason === 'other' && styles.stopReasonButtonSelected
+                ]}
+                onPress={() => setSelectedStopReason('other')}
+              >
+                <Text style={[
+                  styles.stopReasonText,
+                  selectedStopReason === 'other' && styles.stopReasonTextSelected
+                ]}>
+                  📝 Diğer
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Açıklama alanı - Arıza, Hatalı Ürün veya Diğer için */}
+            {(selectedStopReason === 'machine_breakdown' || selectedStopReason === 'defective_product' || selectedStopReason === 'other') && (
+              <TextInput
+                style={styles.issueInput}
+                placeholder={selectedStopReason === 'other' ? 'Lütfen sorunu açıklayın...' : 'Ek açıklama (opsiyonel)...'}
+                value={issueDescription}
+                onChangeText={setIssueDescription}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+            )}
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -1299,6 +1517,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 onPress={() => {
                   setShowIssueModal(false);
                   setIssueDescription('');
+                  setSelectedStopReason(null);
                   setSelectedProductionId(null);
                 }}
               >
@@ -1306,11 +1525,11 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </TouchableOpacity>
               
               <TouchableOpacity
-                style={[styles.sendButton, !issueDescription.trim() && styles.sendButtonDisabled]}
-                onPress={handleSubmitIssue}
-                disabled={!issueDescription.trim()}
+                style={[styles.sendButton, !selectedStopReason && styles.sendButtonDisabled]}
+                onPress={handleSubmitStopReason}
+                disabled={!selectedStopReason}
               >
-                <Text style={styles.sendButtonText}>GÖNDER</Text>
+                <Text style={styles.sendButtonText}>ONAYLA</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1337,6 +1556,39 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  profileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  profileAvatar: {
+    width: 45,
+    height: 45,
+    borderRadius: 22.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  profileAvatarText: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  profileRole: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 13,
+    fontWeight: '500',
   },
   logoutButton: {
     paddingHorizontal: 12,
@@ -1524,6 +1776,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  qualityCheckPanel: {
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    padding: 15,
+    marginTop: 15,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ffc107',
+  },
+  qualityCheckTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#856404',
+    marginBottom: 5,
+  },
+  qualityCheckSubtitle: {
+    fontSize: 12,
+    color: '#856404',
+    marginBottom: 10,
+  },
+  qualityCheckButton: {
+    backgroundColor: '#28a745',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    alignItems: 'center',
+  },
+  qualityCheckButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
   actionButtonsContainer: {
     flexDirection: 'row',
     marginTop: 15,
@@ -1649,6 +1932,30 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  stopReasonContainer: {
+    marginVertical: 20,
+    gap: 12,
+  },
+  stopReasonButton: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+  },
+  stopReasonButtonSelected: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#3498db',
+  },
+  stopReasonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  stopReasonTextSelected: {
+    color: '#3498db',
   },
   buttonDisabled: {
     backgroundColor: '#bdc3c7',

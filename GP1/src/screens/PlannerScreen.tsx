@@ -89,6 +89,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
 
   // Work Order form state
   const [productCode, setProductCode] = useState('');
+  const [productName, setProductName] = useState('');
   const [lotNo, setLotNo] = useState('');
   const [qty, setQty] = useState('');
   const [plannedStartDate, setPlannedStartDate] = useState('');
@@ -111,6 +112,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const [products, setProducts] = useState<any[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState<string>('');
   const [showProductsList, setShowProductsList] = useState<boolean>(false);
+  
 
   // Load products on mount
   useEffect(() => {
@@ -289,6 +291,11 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
       return;
     }
 
+    if (!productName.trim()) {
+      Alert.alert('Hata', 'Lütfen ürün ismini girin!');
+      return;
+    }
+
     if (!qty.trim() || isNaN(parseInt(qty)) || parseInt(qty) <= 0) {
       Alert.alert('Hata', 'Lütfen geçerli bir miktar girin!');
       return;
@@ -396,6 +403,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
         [{ text: 'Tamam', onPress: () => {
           // Formu temizle
           setProductCode('');
+          setProductName('');
           setProductSearchQuery('');
           setLotNo('');
           setQty('');
@@ -468,11 +476,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        <View style={styles.userInfo}>
-          <Text style={styles.userName}>👤 {user.name}</Text>
-          <Text style={styles.userRole}>Planlayıcı</Text>
-        </View>
-
         {/* Sorun Bildirimleri */}
         {issues.length > 0 && (
           <View style={styles.dashboardCard}>
@@ -598,7 +601,17 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                     {workOrderSearchQuery.trim() ? 'Arama sonucu bulunamadı' : 'Aktif iş emri bulunmuyor'}
                   </Text>
                 ) : (
-                  filteredWorkOrders.map((wo) => (
+                  filteredWorkOrders.map((wo) => {
+                    // Bu iş emrine ait stage'leri bul
+                    const woStages = workOrderStages.get(wo.id) || [];
+                    // Bu stage'lere ait en son issue'yu bul
+                    const latestIssue = woStages.length > 0 
+                      ? issues.find(issue => {
+                          return woStages.some(stage => stage.id === issue.work_order_stage_id);
+                        })
+                      : null;
+                    
+                    return (
                     <TouchableOpacity
                       key={wo.id}
                       style={[
@@ -618,8 +631,21 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                       <Text style={styles.workOrderDetail}>
                         Bitiş: {formatDate(wo.planned_end)}
                       </Text>
+                      
+                      {/* Sorun Bildirimi - Eğer varsa göster */}
+                      {latestIssue && (
+                        <View style={styles.issueContainer}>
+                          <Text style={styles.issueLabel}>
+                            ⚠️ Sorun Bildirimi:
+                          </Text>
+                          <Text style={styles.issueText}>
+                            {latestIssue.description || 'Açıklama yok'}
+                          </Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
-                  ))
+                    );
+                  })
                 );
               })()}
             </>
@@ -719,104 +745,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
           </View>
         )}
 
-        {/* Makine Durumu */}
-        <View style={styles.dashboardCard}>
-          <TouchableOpacity 
-            style={styles.sectionHeader}
-            onPress={() => setShowMachineStatus(!showMachineStatus)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.cardTitle}>🏭 Makine Durumu</Text>
-            <Text style={styles.expandIcon}>
-              {showMachineStatus ? '▼' : '▶'}
-            </Text>
-          </TouchableOpacity>
-          
-          {showMachineStatus && (
-            <>
-              {(() => {
-                // Tüm makineleri göster
-                if (backendMachines.length === 0) {
-                  return <Text style={styles.emptyText}>Makine bulunmamaktadır.</Text>;
-                }
-                
-                // Aktif work orders'daki makineleri bul
-                const machineIdToWorkOrder = new Map<number, WorkOrder>();
-                activeWorkOrders.forEach(wo => {
-                  if (wo.machine_id) {
-                    machineIdToWorkOrder.set(wo.machine_id, wo);
-                  }
-                });
-                
-                // Tüm makineleri göster
-                return backendMachines.map((machine) => {
-                  const workOrder = machineIdToWorkOrder.get(machine.id);
-                  const isRunning = workOrder !== undefined;
-                  
-                  // Makinenin kendi durumuna göre durum belirle
-                  let statusText = '';
-                  let statusColor = '#95a5a6'; // Varsayılan gri
-                  
-                  if (machine.status === 'maintenance') {
-                    // Makine arızalı
-                    statusText = 'Arızalı';
-                    statusColor = '#e74c3c'; // Kırmızı
-                  } else if (machine.status === 'inactive') {
-                    // Makine pasif
-                    statusText = 'Pasif';
-                    statusColor = '#95a5a6'; // Gri
-                  } else if (machine.status === 'active') {
-                    // Makine aktif - üretim durumuna göre
-                    if (isRunning) {
-                      statusText = 'Çalışıyor';
-                      statusColor = '#27ae60'; // Yeşil
-                    } else {
-                      statusText = 'Boşta';
-                      statusColor = '#3498db'; // Mavi
-                    }
-                  } else {
-                    statusText = 'Bilinmeyen';
-                    statusColor = '#95a5a6';
-                  }
-                  
-                  // Ürün adını bul
-                  let productName = '';
-                  if (workOrder) {
-                    const product = products.find((p: any) => p.code === workOrder.product_code);
-                    productName = product?.name || workOrder.product_code;
-                  }
-                  
-                  return (
-                    <View key={machine.id} style={styles.machineItem}>
-                      <View style={styles.machineHeader}>
-                        <View>
-                          <Text style={styles.machineName}>{machine.name}</Text>
-                          {machine.location && (
-                            <Text style={styles.machineLocation}>{machine.location}</Text>
-                          )}
-                        </View>
-                        <View style={[
-                          styles.statusBadge,
-                          { backgroundColor: statusColor }
-                        ]}>
-                          <Text style={styles.statusBadgeText}>
-                            {statusText}
-                          </Text>
-                        </View>
-                      </View>
-                      {workOrder && productName && (
-                        <Text style={styles.machineProductionInfo}>
-                          Ürün: {productName}
-                        </Text>
-                      )}
-                    </View>
-                  );
-                });
-              })()}
-            </>
-          )}
-        </View>
-
       </ScrollView>
     );
   };
@@ -824,10 +752,6 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
   const renderNewWorkOrder = () => {
     return (
       <ScrollView style={styles.content}>
-        <View style={styles.userInfo}>
-          <Text style={styles.welcomeText}>Planlayıcı: {user.name}</Text>
-        </View>
-
         {/* İş Emri Oluşturma Formu */}
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Yeni İş Emri Oluştur</Text>
@@ -883,6 +807,7 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                         style={styles.productItem}
                         onPress={() => {
                           setProductCode(product.code);
+                          setProductName(product.name);
                           setProductSearchQuery(product.name);
                           setShowProductsList(false);
                         }}
@@ -896,6 +821,17 @@ const PlannerScreen: React.FC<PlannerScreenProps> = ({ user, onBack }) => {
                 </ScrollView>
               )}
             </View>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Ürün İsmi *</Text>
+            <TextInput
+              style={styles.input}
+              value={productName}
+              onChangeText={setProductName}
+              placeholder="Ürün adını girin veya yukarıdan seçin"
+              autoCapitalize="words"
+            />
           </View>
 
           <View style={styles.inputContainer}>
@@ -1158,6 +1094,133 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#7f8c8d',
     marginBottom: 5,
+  },
+  issueContainer: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#fff3cd',
+    borderRadius: 6,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff9800',
+  },
+  issueLabel: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#e67e22',
+    marginBottom: 4,
+  },
+  issueText: {
+    fontSize: 13,
+    color: '#d35400',
+    fontStyle: 'italic',
+  },
+  // Makine Kartı Stilleri (Aktif Üretimler için)
+  machineCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  machineCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 15,
+  },
+  machineCardName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7f8c8d',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  machineCardCode: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  machineStatusDot: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  machineStatusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  machineMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 10,
+  },
+  metricBox: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  metricIcon: {
+    fontSize: 20,
+    marginBottom: 5,
+  },
+  metricLabel: {
+    fontSize: 11,
+    color: '#7f8c8d',
+    marginBottom: 4,
+    fontWeight: '600',
+  },
+  metricValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  machineDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#ecf0f1',
+  },
+  machineDetail: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontWeight: '500',
+  },
+  pausedIssueInfo: {
+    marginTop: 15,
+    padding: 12,
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff9800',
+  },
+  pausedIssueLabel: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#e67e22',
+    marginBottom: 6,
+  },
+  pausedIssueText: {
+    fontSize: 13,
+    color: '#d35400',
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  pausedIssueTime: {
+    fontSize: 11,
+    color: '#95a5a6',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
   stageItem: {
     padding: 15,

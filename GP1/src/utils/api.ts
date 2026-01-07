@@ -288,6 +288,56 @@ export const authAPI = {
     }
   },
 
+  async updateProfile(data: { full_name: string; email: string; phone: string }) {
+    try {
+      const response = await apiClient.put('/auth/me', {
+        full_name: data.full_name,
+        email: data.email,
+        phone: data.phone,
+      });
+      
+      // Güncellenmiş user bilgisini storage'a kaydet
+      const userData = response.data;
+      const currentUser = await AsyncStorage.getItem('user');
+      if (currentUser) {
+        const user = JSON.parse(currentUser);
+        const updatedUser = {
+          ...user,
+          name: userData.full_name || data.full_name,
+          email: userData.email || data.email,
+          phone: userData.phone || data.phone,
+        };
+        await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      
+      return response.data;
+    } catch (error: any) {
+      console.error('Update profile error:', error);
+      if (error.response) {
+        const errorMessage = error.response.data?.detail || 'Profil güncellenemedi';
+        throw new Error(errorMessage);
+      }
+      throw new Error(error.message || 'Profil güncellenemedi');
+    }
+  },
+
+  async changePassword(data: { current_password: string; new_password: string }) {
+    try {
+      const response = await apiClient.post('/auth/change-password', {
+        current_password: data.current_password,
+        new_password: data.new_password,
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Change password error:', error);
+      if (error.response) {
+        const errorMessage = error.response.data?.detail || 'Şifre değiştirilemedi';
+        throw new Error(errorMessage);
+      }
+      throw new Error(error.message || 'Şifre değiştirilemedi');
+    }
+  },
+
   async listUsers() {
     try {
       const response = await apiClient.get('/auth/users');

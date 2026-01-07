@@ -13,6 +13,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   TextInput,
+  Alert,
+  Modal,
 } from 'react-native';
 import { User } from '../types';
 import { productsAPI, moldsAPI, workOrdersAPI } from '../utils/api';
@@ -60,6 +62,30 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedProducts, setExpandedProducts] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState<string>('');
+  
+  // Ürün ekleme/silme için state'ler
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const [addingProduct, setAddingProduct] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
+  
+  // Yeni ürün form state'leri
+  const [productCode, setProductCode] = useState('');
+  const [productName, setProductName] = useState('');
+  const [description, setDescription] = useState('');
+  const [cavityCount, setCavityCount] = useState('');
+  const [cycleTime, setCycleTime] = useState('');
+  const [injectionTemp, setInjectionTemp] = useState('');
+  const [moldTemp, setMoldTemp] = useState('');
+  const [material, setMaterial] = useState('');
+  const [partWeight, setPartWeight] = useState('');
+  const [hourlyProduction, setHourlyProduction] = useState('');
+  const [selectedMoldId, setSelectedMoldId] = useState<number | null>(null);
+  const [molds, setMolds] = useState<Mold[]>([]);
+  
+  // Sadece planner ve admin ürün ekleyebilir/silebilir
+  const canManageProducts = user.role === 'planner' || user.role === 'admin';
 
   const loadProducts = async () => {
     try {
@@ -72,6 +98,7 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
       // Molds yükle
       const moldsData = await moldsAPI.getMolds();
       const allMolds: Mold[] = Array.isArray(moldsData) ? moldsData : [];
+      setMolds(allMolds); // Molds'ı state'e kaydet
       
       // Work orders yükle (mevcut ürün sayısı için)
       const woResponse = await workOrdersAPI.getWorkOrders();
@@ -131,6 +158,77 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
     });
   };
 
+  const handleAddProduct = async () => {
+    // Validation
+    if (!productName.trim()) {
+      Alert.alert('Hata', 'Lütfen ürün adı girin!');
+      return;
+    }
+
+    // Ürün kodu otomatik oluştur (ürün adından)
+    const autoProductCode = productName.trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '-')
+      .substring(0, 10);
+
+    try {
+      setAddingProduct(true);
+      await productsAPI.createProduct({
+        code: autoProductCode,
+        name: productName.trim(),
+        description: description.trim() || undefined,
+        cavity_count: cavityCount.trim() ? parseInt(cavityCount) : undefined,
+        cycle_time_sec: cycleTime.trim() ? parseFloat(cycleTime) : undefined,
+        injection_temp_c: injectionTemp.trim() ? parseFloat(injectionTemp) : undefined,
+        mold_temp_c: moldTemp.trim() ? parseFloat(moldTemp) : undefined,
+        material: material.trim() || undefined,
+        part_weight_g: partWeight.trim() ? parseFloat(partWeight) : undefined,
+        hourly_production: hourlyProduction.trim() ? parseFloat(hourlyProduction) : undefined,
+      });
+
+      // Eğer kalıp seçildiyse, kalıbı güncelle
+      if (selectedMoldId) {
+        const productsData = await productsAPI.getProducts();
+        const newProduct = Array.isArray(productsData) 
+          ? productsData.find((p: any) => p.code === autoProductCode)
+          : null;
+        
+        if (newProduct) {
+          await moldsAPI.updateMold(selectedMoldId, {
+            product_id: newProduct.id,
+          });
+        }
+      }
+
+      Alert.alert('Başarılı', 'Ürün başarıyla eklendi!');
+      setShowAddModal(false);
+      await loadProducts();
+    } catch (error: any) {
+      console.error('Error adding product:', error);
+      Alert.alert('Hata', error.message || 'Ürün eklenirken bir hata oluştu!');
+    } finally {
+      setAddingProduct(false);
+    }
+  };
+
+  const handleDeleteProduct = async () => {
+    if (!selectedProductId) return;
+
+    try {
+      setDeletingProduct(true);
+      await productsAPI.deleteProduct(selectedProductId);
+      Alert.alert('Başarılı', 'Ürün başarıyla silindi!');
+      setShowDeleteModal(false);
+      setSelectedProductId(null);
+      await loadProducts();
+    } catch (error: any) {
+      console.error('Error deleting product:', error);
+      Alert.alert('Hata', error.message || 'Ürün silinirken bir hata oluştu!');
+    } finally {
+      setDeletingProduct(false);
+    }
+  };
+
   const formatDate = (dateString: string | null) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -162,9 +260,24 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
       >
         <View style={styles.userInfo}>
           <Text style={styles.welcomeText}>Ürün Listesi</Text>
-          <Text style={styles.infoText}>
-            Production_db'deki tüm aktif ürünler
-          </Text>
+          {canManageProducts && (
+            <TouchableOpacity style={styles.addButtonContent} onPress={() => {
+              setProductCode('');
+              setProductName('');
+              setDescription('');
+              setCavityCount('');
+              setCycleTime('');
+              setInjectionTemp('');
+              setMoldTemp('');
+              setMaterial('');
+              setPartWeight('');
+              setHourlyProduction('');
+              setSelectedMoldId(null);
+              setShowAddModal(true);
+            }}>
+              <Text style={styles.addButtonText}>+ Ürün Ekle</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Arama Çubuğu */}
@@ -213,8 +326,8 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
             const moldTemp = product.mold_temp_c || 0;
             const material = product.material || '-';
             const partWeight = product.part_weight_g || 0;
-            // Kalıp adı: önce mold.name, yoksa mold.code, yoksa product.code kullan
-            const moldName = mold?.name || mold?.code || product.code || '-';
+            // Kalıp kodu: önce mold.code, yoksa product.code kullan
+            const moldCode = mold?.code || product.code || '-';
             const isExpanded = expandedProducts.has(product.id);
             
             return (
@@ -227,7 +340,22 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
                 >
                   <View style={styles.productHeader}>
                     <Text style={styles.productNameCollapsed}>{product.name}</Text>
-                    <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
+                    <View style={styles.productHeaderRight}>
+                      {canManageProducts && (
+                        <TouchableOpacity
+                          style={styles.deleteIconButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            setSelectedProductId(product.id);
+                            setShowDeleteModal(true);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.deleteIcon}>🗑️</Text>
+                        </TouchableOpacity>
+                      )}
+                      <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
+                    </View>
                   </View>
                 </TouchableOpacity>
                 
@@ -265,7 +393,7 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
                       <View style={styles.metricBox}>
                         <Text style={styles.metricIcon}>🏭</Text>
                         <Text style={styles.metricLabel}>Kalıp</Text>
-                        <Text style={styles.metricValue}>{moldName}</Text>
+                        <Text style={styles.metricValue}>{moldCode}</Text>
                       </View>
                     </View>
                     
@@ -284,6 +412,185 @@ const ProductsScreen: React.FC<ProductsScreenProps> = ({ user, onBack }) => {
           );
         })()}
       </ScrollView>
+
+      {/* Ürün Ekleme Modal'ı */}
+      {canManageProducts && (
+        <Modal
+          visible={showAddModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowAddModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <ScrollView style={styles.modalScrollView} nestedScrollEnabled={true}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Yeni Ürün Ekle</Text>
+                
+                <Text style={styles.modalLabel}>Ürün Adı *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: Şişe Kapağı"
+                  value={productName}
+                  onChangeText={setProductName}
+                  autoCapitalize="words"
+                />
+
+                <Text style={styles.modalLabel}>Açıklama</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Opsiyonel açıklama"
+                  value={description}
+                  onChangeText={setDescription}
+                />
+
+                <Text style={styles.modalLabel}>Göz Adedi</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: 4"
+                  value={cavityCount}
+                  onChangeText={setCavityCount}
+                  keyboardType="numeric"
+                />
+
+                <Text style={styles.modalLabel}>Çevrim Süresi (saniye)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: 15"
+                  value={cycleTime}
+                  onChangeText={setCycleTime}
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={styles.modalLabel}>Enjeksiyon Sıcaklığı (°C)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: 200"
+                  value={injectionTemp}
+                  onChangeText={setInjectionTemp}
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={styles.modalLabel}>Kalıp Sıcaklığı (°C)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: 30"
+                  value={moldTemp}
+                  onChangeText={setMoldTemp}
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={styles.modalLabel}>Malzeme</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: PP, ABS, PC"
+                  value={material}
+                  onChangeText={setMaterial}
+                  autoCapitalize="characters"
+                />
+
+                <Text style={styles.modalLabel}>Parça Ağırlığı (g)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: 6"
+                  value={partWeight}
+                  onChangeText={setPartWeight}
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={styles.modalLabel}>Saatlik Üretim</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Örn: 1920"
+                  value={hourlyProduction}
+                  onChangeText={setHourlyProduction}
+                  keyboardType="numeric"
+                />
+
+                <Text style={styles.modalLabel}>Kalıp Seçimi (Opsiyonel)</Text>
+                <ScrollView style={styles.moldsListScroll} nestedScrollEnabled={true}>
+                  {molds.map((mold) => (
+                    <TouchableOpacity
+                      key={mold.id}
+                      style={[
+                        styles.moldItem,
+                        selectedMoldId === mold.id && styles.moldItemSelected
+                      ]}
+                      onPress={() => setSelectedMoldId(mold.id)}
+                    >
+                      <Text style={styles.moldItemText}>
+                        {mold.code} - {mold.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonCancel]}
+                    onPress={() => setShowAddModal(false)}
+                    disabled={addingProduct}
+                  >
+                    <Text style={styles.modalButtonCancelText}>İptal</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonSave]}
+                    onPress={handleAddProduct}
+                    disabled={addingProduct}
+                  >
+                    {addingProduct ? (
+                      <ActivityIndicator color="white" />
+                    ) : (
+                      <Text style={styles.modalButtonSaveText}>Kaydet</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
+      )}
+
+      {/* Ürün Silme Onay Modal'ı */}
+      {canManageProducts && (
+        <Modal
+          visible={showDeleteModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowDeleteModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.deleteModalContent}>
+              <Text style={styles.modalTitle}>Ürünü Sil</Text>
+              <Text style={styles.deleteConfirmText}>
+                Bu ürünü silmek istediğinize emin misiniz?
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={() => {
+                    setShowDeleteModal(false);
+                    setSelectedProductId(null);
+                  }}
+                  disabled={deletingProduct}
+                >
+                  <Text style={styles.modalButtonCancelText}>İptal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonDelete]}
+                  onPress={handleDeleteProduct}
+                  disabled={deletingProduct}
+                >
+                  {deletingProduct ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.modalButtonDeleteText}>Sil</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
@@ -317,18 +624,37 @@ const styles = StyleSheet.create({
   placeholder: {
     width: 50,
   },
+  addButton: {
+    backgroundColor: '#27ae60',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   content: {
     flex: 1,
     padding: 20,
   },
   userInfo: {
     marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   welcomeText: {
     fontSize: 20,
     fontWeight: '600',
     color: '#2c3e50',
-    marginBottom: 5,
+  },
+  addButtonContent: {
+    backgroundColor: '#27ae60',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   infoText: {
     fontSize: 14,
@@ -361,10 +687,20 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     flex: 1,
   },
+  productHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  deleteIconButton: {
+    padding: 5,
+  },
+  deleteIcon: {
+    fontSize: 20,
+  },
   expandIcon: {
     fontSize: 16,
     color: '#7f8c8d',
-    marginLeft: 10,
   },
   productDetails: {
     padding: 20,
@@ -465,6 +801,112 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     borderWidth: 1,
     borderColor: '#e0e0e0',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalScrollView: {
+    maxHeight: '90%',
+    width: '90%',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    marginVertical: 20,
+  },
+  deleteModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    width: '80%',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#f9f9f9',
+  },
+  moldsListScroll: {
+    maxHeight: 150,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  moldItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  moldItemSelected: {
+    backgroundColor: '#e3f2fd',
+  },
+  moldItemText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  deleteConfirmText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 20,
+  },
+  modalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginLeft: 10,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#95a5a6',
+  },
+  modalButtonCancelText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalButtonSave: {
+    backgroundColor: '#27ae60',
+  },
+  modalButtonSaveText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalButtonDelete: {
+    backgroundColor: '#e74c3c',
+  },
+  modalButtonDeleteText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 

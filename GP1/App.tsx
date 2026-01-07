@@ -14,11 +14,12 @@ import PlannerScreen from './src/screens/PlannerScreen';
 import ManagerScreen from './src/screens/ManagerScreen';
 import ProductsScreen from './src/screens/ProductsScreen';
 import MoldsScreen from './src/screens/MoldsScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 import { User } from './src/types';
 import { authAPI } from './src/utils/api';
 import { tokenStorage } from './src/utils/tokenStorage';
 
-type Screen = 'dashboard' | 'role-specific' | 'signup' | 'products' | 'molds';
+type Screen = 'dashboard' | 'role-specific' | 'signup' | 'products' | 'molds' | 'profile';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -99,6 +100,14 @@ function App() {
     setCurrentScreen('molds');
   };
 
+  const handleNavigateToProfile = () => {
+    setCurrentScreen('profile');
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+  };
+
   const renderRoleSpecificScreen = () => {
     if (!user) return null;
 
@@ -165,6 +174,7 @@ function App() {
           onNavigateToRoleScreen={handleNavigateToRoleScreen}
           onNavigateToProducts={handleNavigateToProducts}
           onNavigateToMolds={handleNavigateToMolds}
+          onNavigateToProfile={handleNavigateToProfile}
           refreshTrigger={dashboardRefreshTrigger}
         />
       ) : currentScreen === 'products' ? (
@@ -176,6 +186,12 @@ function App() {
         <MoldsScreen 
           user={user} 
           onBack={handleBackToDashboard} 
+        />
+      ) : currentScreen === 'profile' ? (
+        <ProfileScreen 
+          user={user} 
+          onBack={handleBackToDashboard}
+          onUpdateUser={handleUpdateUser}
         />
       ) : (
         renderRoleSpecificScreen()
